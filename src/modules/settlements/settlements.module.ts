@@ -11,6 +11,11 @@ import { AdminSettlementsController } from './admin-settlements.controller';
 import { UsersModule } from '../users/users.module';
 import { Payment } from '../payments/payment.entity';
 import { MailService } from '../auth/mail/mail.service';
+import { PayoutDestination } from './entities/payout-destination.entity';
+import { StellarModule } from '../stellar/stellar.module';
+import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { AuthModule } from '../auth/auth.module';
+import { PayoutDestinationsController } from './payout-destinations.controller';
 
 @Module({
   imports: [
@@ -21,10 +26,14 @@ import { MailService } from '../auth/mail/mail.service';
       SettlementAdjustment,
       MerchantSettlementConfig,
       Payment,
+      PayoutDestination,
     ]),
     UsersModule,
+    StellarModule,
+    AuditLogsModule,
+    AuthModule,
   ],
-  controllers: [SettlementsController, AdminSettlementsController],
+  controllers: [SettlementsController, AdminSettlementsController, PayoutDestinationsController],
   providers: [SettlementsService, MailService],
 })
 export class SettlementsModule {}

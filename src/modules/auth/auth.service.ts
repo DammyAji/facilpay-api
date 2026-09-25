@@ -514,6 +514,17 @@ export class AuthService {
     };
   }
 
+  validateStepUpToken(token: string, userId: string): void {
+    try {
+      const payload = this.jwtService.verify<{ sub: string; purpose: string }>(token);
+      if (payload.sub !== userId || payload.purpose !== 'step-up') {
+        throw new UnauthorizedException('A valid step-up token is required');
+      }
+    } catch {
+      throw new UnauthorizedException('A valid step-up token is required');
+    }
+  }
+
   async regenerateBackupCodes(
     userId: string,
     dto: RegenerateBackupCodesDto,

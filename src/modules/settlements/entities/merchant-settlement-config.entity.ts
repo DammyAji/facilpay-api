@@ -28,6 +28,9 @@ export class MerchantSettlementConfig {
   @Column({ length: 3 })
   currency: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  destinationId: string | null = null;
+
   @Column({ nullable: true })
   lastSettledAt: Date | null = null;
 
