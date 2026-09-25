@@ -15,7 +15,11 @@ export const WEBHOOK_EVENT_TYPES = [
   'payment.expired',
   'payment.split_processed',
   'refund.issued',
+  'refund.failed',
   'dispute.opened',
+  'dispute.updated',
+  'dispute.resolved',
+  'dispute.closed',
   'transaction.multisig_required',
   'transaction.multisig_completed',
 ] as const;

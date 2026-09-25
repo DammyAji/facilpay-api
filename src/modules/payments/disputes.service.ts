@@ -182,7 +182,12 @@ export class DisputesService {
       // Send notifications if status changed
       if (updateDisputeDto.status && previousStatus !== updateDisputeDto.status) {
         await this.sendDisputeStatusNotification(updatedDispute, previousStatus);
-        await this.dispatchDisputeWebhook(updatedDispute, `dispute.${updatedDispute.status}`);
+        await this.dispatchDisputeWebhook(updatedDispute, 'dispute.updated');
+        if (updatedDispute.status === DisputeStatus.RESOLVED) {
+          await this.dispatchDisputeWebhook(updatedDispute, 'dispute.resolved');
+        } else if (updatedDispute.status === DisputeStatus.CLOSED) {
+          await this.dispatchDisputeWebhook(updatedDispute, 'dispute.closed');
+        }
       }
 
       return updatedDispute;
