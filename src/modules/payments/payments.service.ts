@@ -15,7 +15,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { Payment, PaymentStatus } from './payment.entity';
-import { Refund } from './refund.entity';
+import { Refund, RefundReasonCode } from './refund.entity';
 import { Dispute, DisputeStatus } from './dispute.entity';
 import { PaymentSplit, PaymentSplitStatus } from './payment-split.entity';
 import { MerchantFeeConfig } from './merchant-fee-config.entity';
@@ -647,6 +647,41 @@ export class PaymentsService {
     });
   }
 
+  async getRefundReport(from?: string, to?: string) {
+    const query = this.refundRepository
+      .createQueryBuilder('refund')
+      .innerJoin(Payment, 'payment', 'payment.id = refund."paymentId"')
+      .select('refund."reasonCode"', 'reasonCode')
+      .addSelect('payment.currency', 'currency')
+      .addSelect('COUNT(refund.id)', 'count')
+      .addSelect('COALESCE(SUM(refund.amount), 0)', 'amount')
+      .groupBy('refund."reasonCode"')
+      .addGroupBy('payment.currency')
+      .orderBy('refund."reasonCode"', 'ASC')
+      .addOrderBy('payment.currency', 'ASC');
+
+    if (from) {
+      query.andWhere('refund."createdAt" >= :from', { from });
+    }
+    if (to) {
+      query.andWhere('refund."createdAt" <= :to', { to });
+    }
+
+    const rows = await query.getRawMany<{
+      reasonCode: RefundReasonCode;
+      currency: string;
+      count: string;
+      amount: string;
+    }>();
+
+    return rows.map((row) => ({
+      reasonCode: row.reasonCode,
+      currency: row.currency,
+      count: Number(row.count),
+      amount: Number(Number(row.amount).toFixed(2)),
+    }));
+  }
+
   /**
    * Returns a chronological timeline of events for a given payment.
    * Aggregates data from the payment itself, its refunds, and disputes,
@@ -825,6 +860,7 @@ export class PaymentsService {
       const refund = queryRunner.manager.create(Refund, {
         paymentId: id,
         amount: refundAmount,
+        reasonCode: refundDto.reasonCode,
         reason: refundDto.reason,
         initiatedBy: initiatedBy ?? null,
       });

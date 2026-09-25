@@ -31,6 +31,7 @@ import { RecurringPaymentsService } from './recurring-payments.service';
 import { RecurringPaymentsController } from './recurring-payments.controller';
 import { MerchantFeesController } from './merchant-fees.controller';
 import { InvoiceService } from './invoice.service';
+import { RefundsController } from './refunds.controller';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { InvoiceService } from './invoice.service';
     DisputesController,
     RecurringPaymentsController,
     MerchantFeesController,
+    RefundsController,
   ],
   providers: [
     PaymentsService,
