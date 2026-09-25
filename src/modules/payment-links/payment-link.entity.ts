@@ -43,6 +43,9 @@ export class PaymentLink {
   @Column({ default: 0 })
   completions: number;
 
+  @Column({ type: 'integer', nullable: true })
+  maxCompletions: number | null = null;
+
   @Column()
   merchantId: string;
 

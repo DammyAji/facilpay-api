@@ -9,6 +9,7 @@ import {
   IsPositive,
   IsBoolean,
   ValidateIf,
+  IsInt,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
@@ -52,4 +53,10 @@ export class CreatePaymentLinkDto {
   @IsOptional()
   @ApiPropertyOptional({ description: 'Optional expiry date (ISO 8601)', example: '2026-12-31T23:59:59Z' })
   expiresAt?: string;
+
+  @IsInt()
+  @Min(1, { message: 'maxCompletions must be at least 1' })
+  @IsOptional()
+  @ApiPropertyOptional({ description: 'Maximum number of completed payments before the link deactivates', example: 1, minimum: 1 })
+  maxCompletions?: number;
 }
