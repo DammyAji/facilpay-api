@@ -16,6 +16,7 @@ import { StellarModule } from '../stellar/stellar.module';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { AuthModule } from '../auth/auth.module';
 import { PayoutDestinationsController } from './payout-destinations.controller';
+import { Refund } from '../payments/refund.entity';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { PayoutDestinationsController } from './payout-destinations.controller';
       MerchantSettlementConfig,
       Payment,
       PayoutDestination,
+      Refund,
     ]),
     UsersModule,
     StellarModule,

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, DataSource } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -21,6 +21,8 @@ import { StellarService } from '../stellar/stellar.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { AuthService } from '../auth/auth.service';
 import { createHash, randomBytes } from 'crypto';
+import { Refund } from '../payments/refund.entity';
+import { SettlementStatementRow } from '../payments/export/payments-exporter';
 import {
   PaginatedResult,
 } from '../../common/interfaces/paginated-result.interface';
@@ -41,6 +43,8 @@ export class SettlementsService {
     private readonly paymentRepo: Repository<Payment>,
     @InjectRepository(PayoutDestination)
     private readonly destinationRepo: Repository<PayoutDestination>,
+    @InjectRepository(Refund)
+    private readonly refundRepo: Repository<Refund>,
     private readonly dataSource: DataSource,
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
@@ -310,6 +314,84 @@ export class SettlementsService {
       where: { settlementId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async getSettlementStatement(
+    settlementId: string,
+    userId: string,
+    isAdmin: boolean,
+  ): Promise<{
+    settlement: Settlement;
+    merchant: string;
+    period: { from: Date | null; to: Date };
+    rows: SettlementStatementRow[];
+    totals: SettlementStatementRow;
+  }> {
+    const settlement = await this.settlementRepo.findOneBy({ id: settlementId });
+    if (!settlement) throw new NotFoundException(`Settlement ${settlementId} not found`);
+    if (!isAdmin && settlement.merchantId !== userId) {
+      throw new ForbiddenException('You cannot access this settlement statement');
+    }
+
+    const payments = settlement.paymentIds.length
+      ? await this.paymentRepo.findBy({ id: In(settlement.paymentIds) })
+      : [];
+    const refunds = settlement.paymentIds.length
+      ? await this.refundRepo.find({ where: { paymentId: In(settlement.paymentIds) } })
+      : [];
+    const adjustments = await this.settlementAdjustmentRepo.find({
+      where: { settlementId: settlement.id },
+    });
+
+    const rows = payments.map((payment) => {
+      const gross = Number(payment.amount || 0);
+      const fee = Number(payment.feeAmount || 0);
+      const net = Number(
+        payment.netAmount !== undefined && payment.netAmount !== null
+          ? payment.netAmount
+          : gross - fee,
+      );
+      const paymentRefunds = refunds
+        .filter((refund) => refund.paymentId === payment.id)
+        .reduce((sum, refund) => sum + Number(refund.amount || 0), 0);
+      const paymentAdjustments = adjustments
+        .filter((adjustment) => adjustment.paymentId === payment.id)
+        .reduce((sum, adjustment) => sum + Number(adjustment.amount || 0), 0);
+
+      return {
+        paymentId: payment.id,
+        reference: payment.externalReference,
+        gross,
+        fee,
+        net,
+        refunds: paymentRefunds,
+        adjustments: paymentAdjustments,
+      };
+    });
+
+    const totals = rows.reduce<SettlementStatementRow>(
+      (total, row) => ({
+        paymentId: 'TOTAL',
+        reference: null,
+        gross: total.gross + row.gross,
+        fee: total.fee + row.fee,
+        net: total.net + row.net,
+        refunds: total.refunds + row.refunds,
+        adjustments: total.adjustments + row.adjustments,
+      }),
+      { paymentId: 'TOTAL', reference: null, gross: 0, fee: 0, net: 0, refunds: 0, adjustments: 0 },
+    );
+
+    const from = payments.length
+      ? new Date(Math.min(...payments.map((payment) => payment.createdAt.getTime())))
+      : null;
+    return {
+      settlement,
+      merchant: settlement.merchantId,
+      period: { from, to: settlement.processedAt },
+      rows,
+      totals,
+    };
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)

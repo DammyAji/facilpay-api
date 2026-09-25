@@ -37,6 +37,16 @@ All settlement endpoints require a valid JWT in the `Authorization` header:
 Authorization: Bearer <your_jwt_token>
 ```
 
+### Download a Settlement Statement
+
+```http
+GET /v1/settlements/:id/statement?format=pdf|csv
+```
+
+Downloads a reconciliation statement for one settlement. The statement header includes the merchant, settlement period, currency, and transaction hash when available. Its rows include payment ID, external reference, gross amount, fee, net amount, refunds, and settlement adjustments, followed by totals.
+
+The settlement owner or an administrator may download the statement. CSV values are escaped and protected against spreadsheet formula injection.
+
 ### Configure Settlement Schedule
 
 ```
