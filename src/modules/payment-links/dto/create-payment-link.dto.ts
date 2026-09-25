@@ -9,10 +9,59 @@ import {
   IsPositive,
   IsBoolean,
   ValidateIf,
+  IsArray,
+  ValidateNested,
+  IsEnum,
+  Matches,
+  ArrayMinSize,
+  ArrayMaxSize,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
+
+export class CustomFieldDto {
+  @IsString()
+  @IsNotEmpty()
+  @ApiProperty({ description: 'Unique key for the custom field', example: 'tshirt_size' })
+  key: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @ApiProperty({ description: 'Display label for the field', example: 'T-shirt Size' })
+  label: string;
+
+  @IsEnum(['text', 'number', 'select'])
+  @ApiProperty({ enum: ['text', 'number', 'select'], description: 'Field type' })
+  type: 'text' | 'number' | 'select';
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  @ApiPropertyOptional({ description: 'Options for select type fields', example: ['S', 'M', 'L', 'XL'] })
+  options?: string[];
+
+  @IsBoolean()
+  @ApiProperty({ description: 'Whether this field is required', example: true })
+  required: boolean;
+}
+
+export class RequiredFieldsDto {
+  @IsBoolean()
+  @IsOptional()
+  @ApiPropertyOptional({ description: 'Require payer name', example: true, default: false })
+  name?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  @ApiPropertyOptional({ description: 'Require payer email', example: true, default: false })
+  email?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  @ApiPropertyOptional({ description: 'Require payer phone', example: false, default: false })
+  phone?: boolean;
+}
 
 export class CreatePaymentLinkDto {
   @ValidateIf((o) => !o.flexibleAmount)
@@ -52,4 +101,25 @@ export class CreatePaymentLinkDto {
   @IsOptional()
   @ApiPropertyOptional({ description: 'Optional expiry date (ISO 8601)', example: '2026-12-31T23:59:59Z' })
   expiresAt?: string;
+
+  @IsString()
+  @IsOptional()
+  @Matches(/^[a-z0-9-]{3,64}$/, { message: 'Slug must be 3-64 characters, lowercase letters, numbers, and hyphens only' })
+  @ApiPropertyOptional({ description: 'Custom URL-friendly slug (3-64 chars, lowercase letters, numbers, hyphens)', example: 'acme-tshirt' })
+  slug?: string;
+
+  @ValidateNested()
+  @IsOptional()
+  @Type(() => RequiredFieldsDto)
+  @ApiPropertyOptional({ description: 'Required payer fields', type: RequiredFieldsDto })
+  requiredFields?: RequiredFieldsDto;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @IsOptional()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(5, { message: 'Maximum 5 custom fields allowed' })
+  @Type(() => CustomFieldDto)
+  @ApiPropertyOptional({ description: 'Custom fields to collect (max 5)', type: [CustomFieldDto], example: [{ key: 'tshirt_size', label: 'T-shirt Size', type: 'select', options: ['S', 'M', 'L', 'XL'], required: true }] })
+  customFields?: CustomFieldDto[];
 }

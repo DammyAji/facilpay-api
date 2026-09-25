@@ -75,6 +75,12 @@ export class Payment {
   @Column({ nullable: true })
   payerEmail: string | null = null;
 
+  @Column({ nullable: true })
+  payerName: string | null = null;
+
+  @Column({ nullable: true })
+  payerPhone: string | null = null;
+
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, string> | null = null;
 

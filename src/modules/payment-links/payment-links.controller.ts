@@ -69,32 +69,32 @@ export class PaymentLinksController {
   }
 
   @Public()
-  @Post(':token/redeem')
+  @Post(':tokenOrSlug/redeem')
   @ApiOperation({
     summary: 'Redeem a payment link',
-    description: 'Validates the link and, for flexible-amount links, requires a payer-supplied amount.',
+    description: 'Validates the link and, for flexible-amount links, requires a payer-supplied amount. Accepts token or slug.',
   })
-  @ApiParam({ name: 'token', description: '16-byte hex token from the payment link URL' })
+  @ApiParam({ name: 'tokenOrSlug', description: '16-byte hex token or custom slug from the payment link URL' })
   @ApiOkResponse({ description: 'Payment link ready for checkout.' })
-  @ApiResponse({ status: 400, description: 'payerAmount missing or below minAmount on a flexible-amount link.' })
+  @ApiResponse({ status: 400, description: 'payerAmount missing, below minAmount, or missing required payer fields.' })
   @ApiNotFoundResponse({ description: 'Link not found.' })
   @ApiResponse({ status: 410, description: 'Link expired or deactivated.' })
-  redeemLink(@Param('token') token: string, @Body() dto: RedeemPaymentLinkDto) {
-    return this.service.redeemLink(token, dto.payerAmount);
+  redeemLink(@Param('tokenOrSlug') tokenOrSlug: string, @Body() dto: RedeemPaymentLinkDto) {
+    return this.service.redeemLink(tokenOrSlug, dto);
   }
 
   @Public()
-  @Get(':token')
+  @Get(':tokenOrSlug')
   @ApiOperation({
-    summary: 'Retrieve a payment link by token',
-    description: 'Public endpoint — no authentication required. Increments view count on each call.',
+    summary: 'Retrieve a payment link by token or slug',
+    description: 'Public endpoint — no authentication required. Increments view count on each call. Accepts token or slug.',
   })
-  @ApiParam({ name: 'token', description: '16-byte hex token from the payment link URL' })
+  @ApiParam({ name: 'tokenOrSlug', description: '16-byte hex token or custom slug from the payment link URL' })
   @ApiOkResponse({ description: 'Payment link details.' })
   @ApiNotFoundResponse({ description: 'Link not found.' })
   @ApiResponse({ status: 410, description: 'Link expired or deactivated.' })
-  findByToken(@Param('token') token: string) {
-    return this.service.findByToken(token);
+  findByToken(@Param('tokenOrSlug') tokenOrSlug: string) {
+    return this.service.findByTokenOrSlug(tokenOrSlug);
   }
 
   @Patch(':id')

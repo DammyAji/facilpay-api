@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Query, Body, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -10,6 +10,8 @@ import {
 } from '@nestjs/swagger';
 import { SettlementsService } from './settlements.service';
 import { GetSettlementsDto } from './dto/get-settlements.dto';
+import { UpsertSettlementConfigDto } from './dto/upsert-settlement-config.dto';
+import { SetMerchantReserveConfigDto, GetMerchantReserveConfigQueryDto, MerchantReserveConfigResponseDto } from './dto/admin-reserve-config.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -22,6 +24,69 @@ import { UserRole } from '../../common/constants/roles';
 @ApiBearerAuth('bearer')
 export class AdminSettlementsController {
   constructor(private readonly service: SettlementsService) {}
+
+  @Patch('config')
+  @ApiOperation({
+    summary: 'Update settlement config for a merchant (admin)',
+    description: 'Admin-only endpoint. Updates settlement schedule and reserve settings for a merchant.',
+  })
+  @ApiOkResponse({ description: 'Config updated.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  @ApiForbiddenResponse({ description: 'Admin role required.' })
+  updateSettlementConfig(
+    @Body() dto: UpsertSettlementConfigDto & { merchantId: string },
+  ) {
+    return this.service.upsertConfig(dto.merchantId, dto);
+  }
+
+  @Get('reserve-config')
+  @ApiOperation({
+    summary: 'Get reserve config for a merchant (admin)',
+    description: 'Admin-only endpoint. Returns the reserve configuration for a merchant.',
+  })
+  @ApiQuery({ name: 'merchantId', required: true, description: 'Merchant ID' })
+  @ApiQuery({ name: 'currency', required: true, description: 'Currency code' })
+  @ApiOkResponse({ description: 'Reserve config.', type: MerchantReserveConfigResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  @ApiForbiddenResponse({ description: 'Admin role required.' })
+  async getReserveConfig(
+    @Query() query: GetMerchantReserveConfigQueryDto,
+  ): Promise<MerchantReserveConfigResponseDto | null> {
+    const config = await this.service.getReserveConfig(query.merchantId, query.currency);
+    if (!config) return null;
+    return {
+      merchantId: query.merchantId,
+      currency: query.currency,
+      ...config,
+    };
+  }
+
+  @Post('reserve-config')
+  @ApiOperation({
+    summary: 'Set reserve config for a merchant (admin)',
+    description: 'Admin-only endpoint. Sets the reserve percentage and days for a merchant to hold back from settlements.',
+  })
+  @ApiOkResponse({ description: 'Reserve config set.', type: MerchantReserveConfigResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  @ApiForbiddenResponse({ description: 'Admin role required.' })
+  async setReserveConfig(
+    @Body() dto: SetMerchantReserveConfigDto,
+  ): Promise<MerchantReserveConfigResponseDto> {
+    await this.service.upsertConfig(dto.merchantId, {
+      currency: 'USD', // Default - will be overridden
+      schedule: null as any, // Keep existing
+      reservePercent: dto.reservePercent,
+      reserveDays: dto.reserveDays,
+    });
+    const config = await this.service.getReserveConfig(dto.merchantId, 'USD');
+    return {
+      merchantId: dto.merchantId,
+      currency: 'USD',
+      reservePercent: dto.reservePercent,
+      reserveDays: dto.reserveDays,
+      totalReservedAmount: config?.totalReservedAmount || 0,
+    };
+  }
 
   @Get()
   @ApiOperation({
