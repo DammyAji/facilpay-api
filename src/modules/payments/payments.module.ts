@@ -31,6 +31,7 @@ import { RecurringPaymentsService } from './recurring-payments.service';
 import { RecurringPaymentsController } from './recurring-payments.controller';
 import { MerchantFeesController } from './merchant-fees.controller';
 import { InvoiceService } from './invoice.service';
+import { EventsModule } from '../events/events.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { InvoiceService } from './invoice.service';
     UsersModule,
     PaymentLinksModule,
     NotificationsModule,
+    EventsModule,
   ],
   controllers: [
     PaymentsController,

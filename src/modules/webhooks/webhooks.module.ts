@@ -7,6 +7,8 @@ import { WebhookDelivery } from './entities/webhook-delivery.entity';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksProcessor } from './webhooks.processor';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -15,6 +17,8 @@ import { WebhooksProcessor } from './webhooks.processor';
     BullModule.registerQueue({
       name: 'webhooks',
     }),
+    NotificationsModule,
+    UsersModule,
   ],
   controllers: [WebhooksController],
   providers: [WebhooksService, WebhooksProcessor],

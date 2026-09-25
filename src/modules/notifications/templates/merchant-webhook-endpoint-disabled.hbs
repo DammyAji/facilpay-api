@@ -1,0 +1,33 @@
+<h2>Webhook Endpoint Disabled</h2>
+
+<p>Hello,</p>
+
+<p>Your webhook endpoint has been automatically disabled due to repeated delivery failures.</p>
+
+<table>
+  <tr>
+    <td><strong>Endpoint URL:</strong></td>
+    <td>{{endpointUrl}}</td>
+  </tr>
+  <tr>
+    <td><strong>Consecutive Failures:</strong></td>
+    <td>{{consecutiveFailures}}</td>
+  </tr>
+  <tr>
+    <td><strong>Last Error:</strong></td>
+    <td>{{lastError}}</td>
+  </tr>
+</table>
+
+<p>
+  <a href="{{reenableUrl}}">Re-enable Endpoint</a>
+</p>
+
+<p>
+  The endpoint was disabled after 50+ failures within a 24-hour period. 
+  To re-enable it, click the link above. This will reset the failure counters.
+</p>
+
+<p>
+  {{> footer}}
+</p>

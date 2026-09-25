@@ -33,13 +33,19 @@ import { WebhookEndpoint, WEBHOOK_EVENT_TYPES } from './entities/webhook-endpoin
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { ConfigService } from '@nestjs/config';
 
 @ApiTags('webhooks')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
 @Controller('v1/webhooks')
 export class WebhooksController {
-  constructor(private readonly webhooksService: WebhooksService) { }
+  constructor(
+    private readonly webhooksService: WebhooksService,
+    private readonly emailNotificationService: EmailNotificationService,
+    private readonly configService: ConfigService,
+  ) { }
 
   @Post()
   @ApiOperation({
@@ -313,5 +319,29 @@ export class WebhooksController {
     @CurrentUser() user: User,
   ): Promise<void> {
     return this.webhooksService.retryFailedDelivery(deliveryId, user.id);
+  }
+
+  @Post(':id/enable')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Re-enable a disabled webhook endpoint',
+    description: 'Re-enables a webhook endpoint that was disabled due to too many failures. Resets failure counters.',
+  })
+  @ApiParam({ name: 'id', description: 'Webhook endpoint UUID', example: '123e4567-e89b-12d3-a456-426614174000' })
+  @ApiOkResponse({
+    description: 'Webhook endpoint re-enabled.',
+    type: WebhookEndpoint,
+  })
+  @ApiForbiddenResponse({
+    description: 'Endpoint belongs to a different merchant.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Webhook endpoint not found.',
+  })
+  async reenable(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<WebhookEndpoint> {
+    return this.webhooksService.reenableEndpoint(id, user.id);
   }
 }
