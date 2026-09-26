@@ -23,14 +23,43 @@ export class MerchantOnboarding {
   @Column()
   merchantId: string;
 
+  /** Display name for the business (e.g., "Acme Corp") */
   @Column({ nullable: true })
   businessName: string | null;
+
+  /** Legal registered business name */
+  @Column({ nullable: true })
+  legalName: string | null;
 
   @Column({ nullable: true })
   businessEmail: string | null;
 
   @Column({ nullable: true })
   businessAddress: string | null;
+
+  /** Business website URL */
+  @Column({ nullable: true })
+  website: string | null;
+
+  /** Support email for customer inquiries */
+  @Column({ nullable: true })
+  supportEmail: string | null;
+
+  /** Support phone number */
+  @Column({ nullable: true })
+  supportPhone: string | null;
+
+  /** Country code (ISO 3166-1 alpha-2) */
+  @Column({ length: 2, nullable: true })
+  country: string | null;
+
+  /** Timezone (e.g., "America/New_York") */
+  @Column({ nullable: true })
+  timezone: string | null;
+
+  /** Default currency for payments (ISO 4217) */
+  @Column({ length: 3, nullable: true })
+  defaultCurrency: string | null;
 
   @Column({ nullable: true })
   idDocumentUrl: string | null;
@@ -43,6 +72,10 @@ export class MerchantOnboarding {
 
   @Column({ nullable: true })
   rejectionReason: string | null;
+
+  /** Flag for fields that require re-review when changed */
+  @Column({ default: false })
+  requiresReReview: boolean = false;
 
   @CreateDateColumn()
   createdAt: Date;

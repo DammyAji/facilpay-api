@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   RecurringPayment,
@@ -19,6 +19,8 @@ import { IdempotencyService } from './idempotency.service';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class RecurringPaymentsService {
@@ -31,6 +33,8 @@ export class RecurringPaymentsService {
     private readonly paymentsService: PaymentsService,
     private readonly idempotencyService: IdempotencyService,
     private readonly webhooksService: WebhooksService,
+    private readonly emailNotificationService: EmailNotificationService,
+    private readonly configService: ConfigService,
     appLogger: AppLogger,
   ) {
     this.logger = appLogger.child({ module: RecurringPaymentsService.name });
@@ -62,8 +66,10 @@ export class RecurringPaymentsService {
       status: RecurringPaymentStatus.ACTIVE,
       endAt: dto.endAt ? new Date(dto.endAt) : null,
       maxOccurrences: dto.maxOccurrences ?? null,
-      occurrences: 0,
+      notifyDaysBefore: dto.notifyDaysBefore ?? 3,
       consecutiveFailures: 0,
+      occurrences: 0,
+      lastNotifiedCycle: null,
       nextRunAt,
     });
 
@@ -263,28 +269,72 @@ export class RecurringPaymentsService {
     }
   }
 
-  private async notifyPlanPaused(plan: RecurringPayment): Promise<void> {
-    if (!plan.merchantId) {
+  private async notifyPayer(plan: RecurringPayment): Promise<void> {
+    if (!plan.payerEmail || plan.notifyDaysBefore === 0 || !plan.merchantEmail) {
       return;
     }
 
-    try {
-      await this.webhooksService.dispatchEventToMerchant(plan.merchantId, 'recurring_payment.paused', {
-        planId: plan.id,
-        amount: plan.amount,
-        currency: plan.currency,
-        consecutiveFailures: plan.consecutiveFailures,
-        status: plan.status,
-      });
-    } catch (error) {
-      this.logger.error(
-        {
-          planId: plan.id,
-          merchantId: plan.merchantId,
-          error: error instanceof Error ? error.message : error,
-        },
-        'Recurring payment pause notification failed',
-      );
+    const appUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
+    const manageUrl = `${appUrl}/recurring/${plan.id}`;
+    const cancelUrl = `${appUrl}/recurring/${plan.id}/cancel`;
+
+    await this.emailNotificationService.sendPayerRecurringPaymentReminder(
+      plan.payerEmail,
+      null,
+      plan.id,
+      String(plan.amount),
+      plan.currency,
+      plan.nextRunAt,
+      plan.merchantEmail,
+      manageUrl,
+      cancelUrl,
+      plan.description,
+    );
+  }
+
+  /**
+   * Cron job to notify payers before upcoming recurring charges.
+   * Runs daily to find plans whose next charge is within the notification window.
+   * Sends at most one notification per cycle (tracked by lastNotifiedCycle).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  async notifyUpcomingCharges(): Promise<void> {
+    const plans = await this.recurringPaymentRepository.find({
+      where: {
+        status: RecurringPaymentStatus.ACTIVE,
+        notifyDaysBefore: MoreThanOrEqual(1),
+      },
+    });
+
+    const now = new Date();
+    const notifiedCycleNumbers = new Set<string>(); // track already-notified plans
+
+    for (const plan of plans) {
+      const cycleNumber = this.getCycleNumber(plan);
+      const key = `${plan.id}:${cycleNumber}`;
+
+      // Skip if already notified for this cycle
+      if (plan.lastNotifiedCycle === cycleNumber || notifiedCycleNumbers.has(key)) {
+        continue;
+      }
+
+      const daysUntilCharge = this.getDaysUntilCharge(plan.nextRunAt, now);
+
+      if (daysUntilCharge <= plan.notifyDaysBefore && daysUntilCharge >= 0) {
+        await this.notifyPayer(plan);
+        plan.lastNotifiedCycle = cycleNumber;
+        await this.recurringPaymentRepository.save(plan);
+        notifiedCycleNumbers.add(key);
+      }
     }
+  }
+
+  private getCycleNumber(plan: RecurringPayment): number {
+    return plan.occurrences + 1;
+  }
+
+  private getDaysUntilCharge(nextRunAt: Date, from: Date): number {
+    const diff = nextRunAt.getTime() - from.getTime();
+    return Math.ceil(diff / (1000 * 60 * 60 * 24));
   }
 }

@@ -194,15 +194,16 @@ Response includes refunds array:
 
 ## Webhooks
 
-`refund.issued` is one of the platform's officially supported webhook event types (declared in `WEBHOOK_EVENT_TYPES`). Once registered, any Webhook Endpoint whose `events` array includes `refund.issued` will receive a delivery each time a full or partial refund is successfully processed for the endpoint's merchant. Register an endpoint via `POST /v1/webhooks` to start receiving these notifications.
+`refund.issued` and `refund.failed` are officially supported webhook event types (declared in `WEBHOOK_EVENT_TYPES`). Once registered, any Webhook Endpoint whose `events` array includes one of these events will receive a delivery for the endpoint's merchant.
 
 ### Supported Event
 
 | Event name      | Fired when                                       | Recipients                                                                                |
 | --------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `refund.issued` | A full or partial refund is committed to the DB  | Active Webhook Endpoints subscribed to `refund.issued` for the merchant associated with the payment |
+| `refund.failed` | A refund's Stellar submission fails | Active Webhook Endpoints subscribed to `refund.failed` for the merchant associated with the payment |
 
-The full list of supported event names is defined in `WEBHOOK_EVENT_TYPES` (`payment.created`, `payment.completed`, `payment.failed`, `refund.issued`, `dispute.opened`). Fan-out is independent per endpoint — there is no built-in deduplication across endpoints, so if you operate multiple endpoints you will receive multiple deliveries per refund.
+The full list of supported event names is defined in `WEBHOOK_EVENT_TYPES`. Fan-out is independent per endpoint — there is no built-in deduplication across endpoints, so if you operate multiple endpoints you will receive multiple deliveries per refund.
 
 ### Request Headers
 
@@ -211,7 +212,7 @@ Every delivery includes the following headers so receivers can verify authentici
 | Header                  | Description                                                                                                              |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `Content-Type`          | `application/json`                                                                                                       |
-| `X-FacilPay-Event`      | The event name. For refunds this is always `refund.issued`.                                                              |
+| `X-FacilPay-Event`      | The event name: `refund.issued` or `refund.failed`.                                                                       |
 | `X-FacilPay-Signature`  | Hex-encoded HMAC-SHA256 of the raw request body, keyed with the endpoint's `secret` (e.g. `whsec_...`).                  |
 
 Verify the signature on your server by re-computing HMAC-SHA256 over the exact bytes you received, keyed with the secret returned when the endpoint was created. See the Webhooks API reference for a worked example.
@@ -274,6 +275,22 @@ The body follows the standard `{ event, timestamp, data }` envelope. `data` alwa
 ```
 
 > **Schema note:** the canonical envelope is `{ event, timestamp, data }`. The fields shown inside `data.payment` and `data.refund` mirror the persisted entity state at the moment of dispatch — `data.refund` describes only the **single** refund event that just fired, while `data.payment.refundedAmount` is the cumulative total across every refund for the payment.
+
+#### Example — Failed Stellar Refund
+
+```json
+{
+  "event": "refund.failed",
+  "timestamp": "2026-01-26T11:00:00.000Z",
+  "data": {
+    "payment": { "id": "123e4567-e89b-12d3-a456-426614174000", "currency": "USD", "status": "PARTIALLY_REFUNDED" },
+    "refund": { "id": "456e7890-e89b-12d3-a456-426614174000", "amount": "50.00", "reasonCode": "REQUESTED_BY_CUSTOMER", "reason": "Customer requested refund" },
+    "status": "failed",
+    "failureReason": "Stellar transaction rejected",
+    "timestamp": "2026-01-26T11:00:00.000Z"
+  }
+}
+```
 
 ### Delivery Semantics
 

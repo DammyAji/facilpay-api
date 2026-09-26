@@ -31,8 +31,7 @@ import { RecurringPaymentsService } from './recurring-payments.service';
 import { RecurringPaymentsController } from './recurring-payments.controller';
 import { MerchantFeesController } from './merchant-fees.controller';
 import { InvoiceService } from './invoice.service';
-import { InvoiceReminder } from './invoice-reminder.entity';
-import { InvoiceReminderService } from './invoice-reminder.service';
+import { EventsModule } from '../events/events.module';
 
 @Module({
   imports: [
@@ -55,6 +54,7 @@ import { InvoiceReminderService } from './invoice-reminder.service';
     UsersModule,
     PaymentLinksModule,
     NotificationsModule,
+    EventsModule,
   ],
   controllers: [
     PaymentsController,
@@ -63,6 +63,7 @@ import { InvoiceReminderService } from './invoice-reminder.service';
     DisputesController,
     RecurringPaymentsController,
     MerchantFeesController,
+    RefundsController,
   ],
   providers: [
     PaymentsService,

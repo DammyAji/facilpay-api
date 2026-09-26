@@ -3,22 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';
 import { MerchantIpAllowlist } from './entities/merchant-ip-allowlist.entity';
-import { MerchantBranding } from './entities/merchant-branding.entity';
-import { MerchantSettings } from './entities/merchant-settings.entity';
+import { MerchantOnboarding, OnboardingStatus } from '../onboarding/merchant-onboarding.entity';
 import { UpdateGeoRestrictionsDto } from './dto/update-geo-restrictions.dto';
 import { UpdateIpAllowlistDto } from './dto/update-ip-allowlist.dto';
-import { UpdateBrandingDto } from './dto/update-branding.dto';
-import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { MerchantProfileResponseDto, UpdateMerchantProfileDto } from './dto/merchant-profile.dto';
 import { GeoLookupService } from './geo-lookup.service';
 import { GeoRestrictedException } from './geo-restricted.exception';
 import { IpAllowlistBlockedException } from './ip-allowlist-blocked.exception';
 import { isIpAllowed } from './ip-utils';
-import { ConfigService } from '@nestjs/config';
-import { randomBytes } from 'crypto';
-import { createReadStream, mkdirSync, existsSync } from 'fs';
-import { join } from 'path';
-import { Pipeline } from 'stream/promises';
-import { Storage } from '@google-cloud/storage';
+import { AuditLogsService, RecordAuditLogParams } from '../audit-logs/audit-logs.service';
+import { ActorType } from '../audit-logs/audit-log.entity';
 
 @Injectable()
 export class MerchantsService {
@@ -31,182 +25,11 @@ export class MerchantsService {
     private readonly geoRestrictionRepo: Repository<MerchantGeoRestriction>,
     @InjectRepository(MerchantIpAllowlist)
     private readonly ipAllowlistRepo: Repository<MerchantIpAllowlist>,
-    @InjectRepository(MerchantBranding)
-    private readonly brandingRepo: Repository<MerchantBranding>,
-    @InjectRepository(MerchantSettings)
-    private readonly settingsRepo: Repository<MerchantSettings>,
+    @InjectRepository(MerchantOnboarding)
+    private readonly onboardingRepo: Repository<MerchantOnboarding>,
     private readonly geoLookupService: GeoLookupService,
-    private readonly configService: ConfigService,
-  ) {
-    // Initialize Google Cloud Storage if credentials are provided
-    const keyFilename = this.configService.get('GOOGLE_APPLICATION_CREDENTIALS');
-    if (keyFilename) {
-      this.storage = new Storage({ keyFilename });
-      this.bucketName = this.configService.get('GCS_BUCKET_NAME', 'facilpay-assets');
-    } else {
-      this.storage = new Storage();
-      this.bucketName = this.configService.get('GCS_BUCKET_NAME', 'facilpay-assets');
-    }
-  }
-
-  /**
-   * Get branding with fallback to defaults
-   */
-  async getBranding(merchantId: string): Promise<MerchantBranding | null> {
-    return this.brandingRepo.findOneBy({ merchantId });
-  }
-
-  /**
-   * Get branding with FacilPay defaults fallback
-   */
-  async getBrandingWithDefaults(merchantId: string): Promise<{
-    displayName: string;
-    logo: string | null;
-    primaryColor: string;
-    supportEmail: string | null;
-    supportUrl: string | null;
-  }> {
-    const branding = await this.getBranding(merchantId);
-    
-    return {
-      displayName: branding?.displayName ?? 'FacilPay',
-      logo: branding?.logo ?? null,
-      primaryColor: branding?.primaryColor ?? '#1a1a2e',
-      supportEmail: branding?.supportEmail ?? this.configService.get('DEFAULT_SUPPORT_EMAIL', 'support@facilpay.com'),
-      supportUrl: branding?.supportUrl ?? this.configService.get('DEFAULT_SUPPORT_URL', 'https://facilpay.com'),
-    };
-  }
-
-  /**
-   * Upsert merchant branding
-   */
-  async upsertBranding(merchantId: string, dto: UpdateBrandingDto): Promise<MerchantBranding> {
-    let branding = await this.brandingRepo.findOneBy({ merchantId });
-    if (!branding) {
-      branding = this.brandingRepo.create({ merchantId });
-    }
-
-    if (dto.displayName !== undefined) branding.displayName = dto.displayName;
-    if (dto.primaryColor !== undefined) branding.primaryColor = dto.primaryColor;
-    if (dto.supportEmail !== undefined) branding.supportEmail = dto.supportEmail;
-    if (dto.supportUrl !== undefined) branding.supportUrl = dto.supportUrl;
-
-    return this.brandingRepo.save(branding);
-  }
-
-  /**
-   * Upload merchant logo
-   * Validates: PNG/SVG, max 500KB
-   */
-  async uploadLogo(merchantId: string, file: Express.Multer.File): Promise<{ logoUrl: string }> {
-    // Validate file type
-    const allowedTypes = ['image/png', 'image/svg+xml'];
-    if (!allowedTypes.includes(file.mimetype)) {
-      throw new BadRequestException('Logo must be PNG or SVG format');
-    }
-
-    // Validate file size (500KB = 512000 bytes)
-    const maxSize = 512000;
-    if (file.size > maxSize) {
-      throw new BadRequestException('Logo must be 500KB or less');
-    }
-
-    // Generate unique filename
-    const ext = file.mimetype === 'image/svg+xml' ? 'svg' : 'png';
-    const filename = `${merchantId}-${randomBytes(16).toString('hex')}.${ext}`;
-    const gcsPath = `${this.logoStoragePath}/${filename}`;
-
-    try {
-      const bucket = this.storage.bucket(this.bucketName);
-      const gcsFile = bucket.file(gcsPath);
-
-      // Upload to Google Cloud Storage
-      await gcsFile.save(file.buffer, {
-        contentType: file.mimetype,
-        metadata: {
-          cacheControl: 'public, max-age=31536000',
-        },
-      });
-
-      // Make the file publicly accessible
-      await gcsFile.makePublic();
-
-      const logoUrl = `https://storage.googleapis.com/${this.bucketName}/${gcsPath}`;
-
-      // Update branding record with logo URL
-      let branding = await this.brandingRepo.findOneBy({ merchantId });
-      if (!branding) {
-        branding = this.brandingRepo.create({ merchantId, logo: logoUrl });
-      } else {
-        branding.logo = logoUrl;
-      }
-      await this.brandingRepo.save(branding);
-
-      return { logoUrl };
-    } catch (error) {
-      // Fallback to local storage if GCS fails
-      const uploadDir = join(process.cwd(), 'uploads', this.logoStoragePath);
-      if (!existsSync(uploadDir)) {
-        mkdirSync(uploadDir, { recursive: true });
-      }
-
-      const localPath = join(uploadDir, filename);
-      await Pipeline(file.buffer, createReadStream() as any);
-
-      // Write using Node.js fs
-      const { writeFileSync } = await import('fs');
-      writeFileSync(localPath, file.buffer);
-
-      const logoUrl = `/uploads/${gcsPath}`;
-      
-      let branding = await this.brandingRepo.findOneBy({ merchantId });
-      if (!branding) {
-        branding = this.brandingRepo.create({ merchantId, logo: logoUrl });
-      } else {
-        branding.logo = logoUrl;
-      }
-      await this.brandingRepo.save(branding);
-
-      return { logoUrl };
-    }
-  }
-
-  /**
-   * Get merchant settings
-   */
-  async getSettings(merchantId: string): Promise<MerchantSettings | null> {
-    return this.settingsRepo.findOneBy({ merchantId });
-  }
-
-  /**
-   * Get settings with defaults fallback
-   */
-  async getSettingsWithDefaults(merchantId: string): Promise<{
-    remindersEnabled: boolean;
-    reminderOffsets: number[];
-  }> {
-    const settings = await this.getSettings(merchantId);
-    
-    return {
-      remindersEnabled: settings?.remindersEnabled ?? true,
-      reminderOffsets: settings?.reminderOffsets ?? [-3, 0, 7],
-    };
-  }
-
-  /**
-   * Upsert merchant settings
-   */
-  async upsertSettings(merchantId: string, dto: UpdateSettingsDto): Promise<MerchantSettings> {
-    let settings = await this.settingsRepo.findOneBy({ merchantId });
-    if (!settings) {
-      settings = this.settingsRepo.create({ merchantId });
-    }
-
-    if (dto.remindersEnabled !== undefined) settings.remindersEnabled = dto.remindersEnabled;
-    if (dto.reminderOffsets !== undefined) settings.reminderOffsets = dto.reminderOffsets;
-
-    return this.settingsRepo.save(settings);
-  }
+    private readonly auditLogsService: AuditLogsService,
+  ) {}
 
   async upsertGeoRestrictions(
     merchantId: string,
@@ -304,5 +127,144 @@ export class MerchantsService {
     if (!isIpAllowed(ip, record.allowedIps)) {
       throw new IpAllowlistBlockedException(ip);
     }
+  }
+
+  /**
+   * Get the merchant's profile information
+   */
+  async getProfile(merchantId: string): Promise<MerchantProfileResponseDto> {
+    let onboarding = await this.onboardingRepo.findOneBy({ merchantId });
+    
+    // Create default onboarding record if none exists
+    if (!onboarding) {
+      onboarding = await this.onboardingRepo.save(
+        this.onboardingRepo.create({ merchantId, status: OnboardingStatus.PENDING }),
+      );
+    }
+
+    return {
+      merchantId: onboarding.merchantId,
+      businessName: onboarding.businessName,
+      legalName: onboarding.legalName,
+      website: onboarding.website,
+      supportEmail: onboarding.supportEmail,
+      supportPhone: onboarding.supportPhone,
+      country: onboarding.country,
+      timezone: onboarding.timezone,
+      defaultCurrency: onboarding.defaultCurrency,
+      status: onboarding.status,
+      requiresReReview: onboarding.requiresReReview,
+    };
+  }
+
+  /**
+   * Update the merchant's profile information
+   * Changes to legalName or country trigger re-review
+   */
+  async updateProfile(
+    merchantId: string,
+    dto: UpdateMerchantProfileDto,
+    actorId?: string,
+  ): Promise<MerchantProfileResponseDto> {
+    let onboarding = await this.onboardingRepo.findOneBy({ merchantId });
+    
+    if (!onboarding) {
+      onboarding = this.onboardingRepo.create({ merchantId, status: OnboardingStatus.PENDING });
+    }
+
+    // Track changes for audit log
+    const changes: Record<string, { old: string; new: string }> = {};
+    const sensitiveFields = ['legalName', 'country'];
+    let requiresReReview = false;
+
+    // Apply updates
+    if (dto.businessName !== undefined) {
+      if (onboarding.businessName !== dto.businessName) {
+        changes['businessName'] = { old: onboarding.businessName || '', new: dto.businessName };
+        onboarding.businessName = dto.businessName;
+      }
+    }
+    if (dto.legalName !== undefined) {
+      if (onboarding.legalName !== dto.legalName) {
+        changes['legalName'] = { old: onboarding.legalName || '', new: dto.legalName };
+        onboarding.legalName = dto.legalName;
+        requiresReReview = true;
+      }
+    }
+    if (dto.website !== undefined) {
+      if (onboarding.website !== dto.website) {
+        changes['website'] = { old: onboarding.website || '', new: dto.website };
+        onboarding.website = dto.website;
+      }
+    }
+    if (dto.supportEmail !== undefined) {
+      if (onboarding.supportEmail !== dto.supportEmail) {
+        changes['supportEmail'] = { old: onboarding.supportEmail || '', new: dto.supportEmail };
+        onboarding.supportEmail = dto.supportEmail;
+      }
+    }
+    if (dto.supportPhone !== undefined) {
+      if (onboarding.supportPhone !== dto.supportPhone) {
+        changes['supportPhone'] = { old: onboarding.supportPhone || '', new: dto.supportPhone };
+        onboarding.supportPhone = dto.supportPhone;
+      }
+    }
+    if (dto.country !== undefined) {
+      if (onboarding.country !== dto.country) {
+        changes['country'] = { old: onboarding.country || '', new: dto.country };
+        onboarding.country = dto.country;
+        requiresReReview = true;
+      }
+    }
+    if (dto.timezone !== undefined) {
+      if (onboarding.timezone !== dto.timezone) {
+        changes['timezone'] = { old: onboarding.timezone || '', new: dto.timezone };
+        onboarding.timezone = dto.timezone;
+      }
+    }
+    if (dto.defaultCurrency !== undefined) {
+      if (onboarding.defaultCurrency !== dto.defaultCurrency) {
+        changes['defaultCurrency'] = { old: onboarding.defaultCurrency || '', new: dto.defaultCurrency };
+        onboarding.defaultCurrency = dto.defaultCurrency;
+      }
+    }
+
+    // Set re-review flag if sensitive fields changed
+    if (requiresReReview) {
+      onboarding.requiresReReview = true;
+      // Also set status to under_review if previously approved
+      if (onboarding.status === OnboardingStatus.APPROVED) {
+        onboarding.status = OnboardingStatus.UNDER_REVIEW;
+      }
+    }
+
+    const saved = await this.onboardingRepo.save(onboarding);
+
+    // Record audit log for profile changes
+    if (Object.keys(changes).length > 0) {
+      const auditParams: RecordAuditLogParams = {
+        actorId,
+        actorType: ActorType.MERCHANT,
+        action: 'merchant_profile_updated',
+        resourceType: 'merchant_profile',
+        resourceId: merchantId,
+        metadata: { changes, requiresReReview },
+      };
+      await this.auditLogsService.record(auditParams);
+    }
+
+    return {
+      merchantId: saved.merchantId,
+      businessName: saved.businessName,
+      legalName: saved.legalName,
+      website: saved.website,
+      supportEmail: saved.supportEmail,
+      supportPhone: saved.supportPhone,
+      country: saved.country,
+      timezone: saved.timezone,
+      defaultCurrency: saved.defaultCurrency,
+      status: saved.status,
+      requiresReReview: saved.requiresReReview,
+    };
   }
 }

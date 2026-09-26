@@ -251,6 +251,68 @@ export class EmailNotificationService {
     });
   }
 
+  async sendPayerRecurringPaymentReminder(
+    to: string,
+    payerName: string | null,
+    planId: string,
+    amount: string,
+    currency: string,
+    chargeDate: Date,
+    merchantEmail: string,
+    manageUrl: string,
+    cancelUrl: string,
+    description: string | null,
+  ): Promise<void> {
+    const formattedDate = chargeDate.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    await this.enqueue({
+      to,
+      subject: `Upcoming Charge: ${amount} ${currency} on ${formattedDate}`,
+      templateName: 'payer-recurring-payment-reminder',
+      templateData: {
+        payerName: payerName || undefined,
+        paymentAmount: amount,
+        paymentCurrency: currency,
+        chargeDate: formattedDate,
+        merchantEmail,
+        manageUrl,
+        cancelUrl,
+        planDescription: description || undefined,
+      },
+      eventType: EmailEventType.PAYMENT_CONFIRMED,
+      recipientRole: 'payer',
+      paymentId: planId,
+      includeUnsubscribe: true,
+    });
+  }
+
+  async sendWebhookEndpointDisabled(
+    to: string,
+    endpointUrl: string,
+    consecutiveFailures: number,
+    lastError: string,
+    reenableUrl: string,
+  ): Promise<void> {
+    await this.enqueue({
+      to,
+      subject: `Webhook Endpoint Disabled: ${endpointUrl}`,
+      templateName: 'merchant-webhook-endpoint-disabled',
+      templateData: {
+        endpointUrl,
+        consecutiveFailures,
+        lastError,
+        reenableUrl,
+      },
+      eventType: EmailEventType.PAYMENT_RECEIVED,
+      recipientRole: 'merchant',
+    });
+  }
+
   private async enqueue(data: SendEmailJobData): Promise<void> {
     await this.emailQueue.add('send', data, {
       attempts: 3,
