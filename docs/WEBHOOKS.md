@@ -19,6 +19,9 @@ All webhook management endpoints live under `/v1/webhooks` and require a valid J
 | `dispute.opened`         | A dispute is opened on a payment             |
 | `transaction.multisig_required`  | A multi-sig transaction is pending additional signatures (threshold not yet met) |
 | `transaction.multisig_completed`  | A multi-sig transaction has gathered all required signatures and been submitted   |
+| `settlement.created`     | A settlement is created                      |
+| `settlement.completed`   | A settlement payout completes successfully   |
+| `settlement.failed`      | A settlement payout fails                    |
 
 ## Endpoint Management
 

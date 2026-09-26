@@ -78,6 +78,12 @@ export class RecurringPayment {
   @Column({ type: 'int', default: 0 })
   consecutiveFailures: number;
 
+  @Column({ type: 'int', default: 3 })
+  notifyDaysBefore: number;
+
+  @Column({ type: 'int', nullable: true })
+  lastNotifiedCycle: number | null;
+
   @Column({ type: 'timestamp', nullable: true })
   cancelledAt: Date | null;
 
