@@ -6,7 +6,7 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-import { SettlementSchedule } from './merchant-settlement-config.entity';
+import { SettlementSchedule, ReserveStatus } from './merchant-settlement-config.entity';
 
 export enum SettlementStatus {
   PENDING = 'pending',
@@ -28,6 +28,14 @@ export class Settlement {
 
   @Column({ type: 'decimal', precision: 12, scale: 2 })
   totalAmount: number;
+
+  /** Amount withheld as reserve */
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  reservedAmount: number = 0;
+
+  /** Net amount after reserve (totalAmount - reservedAmount) */
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  netAmount: number = 0;
 
   @Column({ length: 3 })
   currency: string;
@@ -52,6 +60,16 @@ export class Settlement {
 
   @Column()
   processedAt: Date;
+
+  /** Date when reserved funds are released (processedAt + reserveDays) */
+  @Column({ nullable: true })
+  reservedReleaseAt: Date | null = null;
+
+  @Column({ type: 'enum', enum: ReserveStatus, default: ReserveStatus.HELD })
+  reserveStatus: ReserveStatus = ReserveStatus.HELD;
+
+  @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+  releasedAmount: number = 0;
 
   @CreateDateColumn()
   createdAt: Date;

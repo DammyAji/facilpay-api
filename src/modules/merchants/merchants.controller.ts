@@ -12,6 +12,7 @@ import {
 import { MerchantsService } from './merchants.service';
 import { UpdateGeoRestrictionsDto } from './dto/update-geo-restrictions.dto';
 import { UpdateIpAllowlistDto } from './dto/update-ip-allowlist.dto';
+import { MerchantProfileResponseDto, UpdateMerchantProfileDto } from './dto/merchant-profile.dto';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';
 import { MerchantIpAllowlist } from './entities/merchant-ip-allowlist.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -24,6 +25,39 @@ import { User } from '../users/user.entity';
 @Controller('v1/merchants')
 export class MerchantsController {
   constructor(private readonly merchantsService: MerchantsService) {}
+
+  @Get('me')
+  @ApiOperation({
+    summary: 'Get merchant profile',
+    description: 'Returns the authenticated merchant\'s business profile information.',
+  })
+  @ApiOkResponse({
+    description: 'Merchant profile.',
+    type: MerchantProfileResponseDto,
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  getProfile(@CurrentUser() user: User): Promise<MerchantProfileResponseDto> {
+    return this.merchantsService.getProfile(user.id);
+  }
+
+  @Patch('me')
+  @ApiOperation({
+    summary: 'Update merchant profile',
+    description: 'Updates the merchant\'s business profile. Changes to legalName or country trigger re-review.',
+  })
+  @ApiBody({ type: UpdateMerchantProfileDto })
+  @ApiOkResponse({
+    description: 'Profile updated.',
+    type: MerchantProfileResponseDto,
+  })
+  @ApiBadRequestResponse({ description: 'Validation failed.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  updateProfile(
+    @Body() dto: UpdateMerchantProfileDto,
+    @CurrentUser() user: User,
+  ): Promise<MerchantProfileResponseDto> {
+    return this.merchantsService.updateProfile(user.id, dto, user.id);
+  }
 
   @Patch('me/geo-restrictions')
   @ApiOperation({

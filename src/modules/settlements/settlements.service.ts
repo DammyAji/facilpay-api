@@ -8,6 +8,7 @@ import { SettlementAdjustment } from './entities/settlement-adjustment.entity';
 import {
   MerchantSettlementConfig,
   SettlementSchedule,
+  ReserveStatus,
 } from './entities/merchant-settlement-config.entity';
 import { UpsertSettlementConfigDto } from './dto/upsert-settlement-config.dto';
 import { GetSettlementsDto } from './dto/get-settlements.dto';
@@ -236,6 +237,23 @@ export class SettlementsService {
     return this.configRepo.save(config);
   }
 
+  /**
+   * Get the current reserve config for a merchant
+   */
+  async getReserveConfig(userId: string, currency: string): Promise<{
+    reservePercent: number;
+    reserveDays: number;
+    totalReservedAmount: number;
+  } | null> {
+    const config = await this.configRepo.findOneBy({ userId, currency });
+    if (!config) return null;
+    return {
+      reservePercent: config.reservePercent,
+      reserveDays: config.reserveDays,
+      totalReservedAmount: Number(config.totalReservedAmount),
+    };
+  }
+
   async findMerchantSettlements(
     merchantId: string,
     dto?: GetSettlementsDto,
@@ -402,6 +420,82 @@ export class SettlementsService {
     await this.processSettlementsForSchedule(SettlementSchedule.MONTHLY);
   }
 
+  /**
+   * Daily job to release matured reserves
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_1AM)
+  async releaseMaturedReserves(): Promise<void> {
+    this.logger.log('Starting reserve release job...');
+
+    const maturedSettlements = await this.settlementRepo
+      .createQueryBuilder('settlement')
+      .where('settlement.reserveStatus = :status', { status: ReserveStatus.HELD })
+      .andWhere('settlement.reservedReleaseAt <= :now', { now: new Date() })
+      .getMany();
+
+    this.logger.log(`Found ${maturedSettlements.length} settlements with matured reserves`);
+
+    for (const settlement of maturedSettlements) {
+      try {
+        await this.releaseSettlementReserve(settlement);
+      } catch (error) {
+        this.logger.error(
+          `Reserve release failed for settlement ${settlement.id}`,
+          error instanceof Error ? error.stack : error,
+        );
+      }
+    }
+  }
+
+  /**
+   * Release reserved funds for a settlement
+   */
+  private async releaseSettlementReserve(settlement: Settlement): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // Lock and get current settlement state
+      const lockedSettlement = await queryRunner.manager
+        .createQueryBuilder(Settlement, 's')
+        .setLock('pessimistic_write')
+        .where('s.id = :id', { id: settlement.id })
+        .getOne();
+
+      if (!lockedSettlement || lockedSettlement.reserveStatus !== ReserveStatus.HELD) {
+        await queryRunner.rollbackTransaction();
+        return;
+      }
+
+      // Update settlement to released
+      lockedSettlement.reserveStatus = ReserveStatus.RELEASED;
+      lockedSettlement.releasedAmount = Number(lockedSettlement.reservedAmount);
+      await queryRunner.manager.save(lockedSettlement);
+
+      // Update merchant's total reserved amount
+      const config = await queryRunner.manager
+        .createQueryBuilder(MerchantSettlementConfig, 'config')
+        .setLock('pessimistic_write')
+        .where('config.userId = :merchantId', { merchantId: lockedSettlement.merchantId })
+        .andWhere('config.currency = :currency', { currency: lockedSettlement.currency })
+        .getOne();
+
+      if (config) {
+        config.totalReservedAmount = Math.max(0, Number(config.totalReservedAmount) - Number(lockedSettlement.reservedAmount));
+        await queryRunner.manager.save(config);
+      }
+
+      await queryRunner.commitTransaction();
+      this.logger.log(`Released reserve ${lockedSettlement.reservedAmount} for settlement ${lockedSettlement.id}`);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
   private async processSettlementsForSchedule(schedule: SettlementSchedule): Promise<void> {
     const configs = await this.configRepo.find({ where: { schedule } });
 
@@ -516,10 +610,23 @@ export class SettlementsService {
         0,
       );
 
+      // Calculate reserve amount if configured
+      const reservePercent = lockedConfig.reservePercent || 0;
+      const reserveDays = lockedConfig.reserveDays || 0;
+      const reservedAmount = reservePercent > 0 ? (totalAmount * reservePercent) / 100 : 0;
+      const netAmount = totalAmount - reservedAmount;
+
+      // Calculate release date
+      const reservedReleaseAt = reserveDays > 0 
+        ? new Date(Date.now() + reserveDays * 24 * 60 * 60 * 1000)
+        : null;
+
       const settlement = queryRunner.manager.create(Settlement, {
         merchantId: lockedConfig.userId,
         schedule: lockedConfig.schedule,
         totalAmount,
+        reservedAmount,
+        netAmount,
         currency: lockedConfig.currency,
         payoutDestinationId: lockedConfig.destinationId,
         paymentIds: completedPayments.map((p) => p.id),
@@ -536,6 +643,12 @@ export class SettlementsService {
       );
 
       lockedConfig.lastSettledAt = new Date();
+      
+      // Update total reserved amount
+      if (reservedAmount > 0) {
+        lockedConfig.totalReservedAmount = Number(lockedConfig.totalReservedAmount || 0) + reservedAmount;
+      }
+      
       await queryRunner.manager.save(lockedConfig);
 
       // Mark settlement as completed

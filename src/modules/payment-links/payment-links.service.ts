@@ -4,13 +4,15 @@ import {
   ForbiddenException,
   GoneException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
-import { PaymentLink } from './payment-link.entity';
+import { PaymentLink, RESERVED_SLUGS, CustomField } from './payment-link.entity';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { UpdatePaymentLinkDto } from './dto/update-payment-link.dto';
+import { RedeemPaymentLinkDto } from './dto/redeem-payment-link.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 
@@ -21,47 +23,168 @@ export class PaymentLinksService {
     private readonly repo: Repository<PaymentLink>,
   ) {}
 
+  /**
+   * Validates that a slug is valid format and not reserved
+   */
+  private validateSlug(slug: string): void {
+    if (!/^[a-z0-9-]{3,64}$/.test(slug)) {
+      throw new BadRequestException(
+        'Slug must be 3-64 characters, lowercase letters, numbers, and hyphens only',
+      );
+    }
+    if (RESERVED_SLUGS.has(slug)) {
+      throw new BadRequestException(`Slug '${slug}' is reserved and cannot be used`);
+    }
+  }
+
+  /**
+   * Validates required fields and custom fields during redemption
+   */
+  private validatePayerFields(
+    link: PaymentLink,
+    dto: RedeemPaymentLinkDto,
+  ): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+
+    // Check required fields
+    if (link.requiredFields?.name && !dto.name) {
+      errors.push('name is required');
+    }
+    if (link.requiredFields?.email && !dto.email) {
+      errors.push('email is required');
+    }
+    if (link.requiredFields?.phone && !dto.phone) {
+      errors.push('phone is required');
+    }
+
+    // Check custom fields
+    if (link.customFields && link.customFields.length > 0) {
+      const providedKeys = new Set(dto.customFields?.map((f) => f.key) || []);
+      for (const field of link.customFields) {
+        if (field.required && !providedKeys.has(field.key)) {
+          errors.push(`${field.key} is required`);
+        }
+      }
+
+      // Validate custom field values
+      for (const provided of dto.customFields || []) {
+        const fieldDef = link.customFields.find((f) => f.key === provided.key);
+        if (!fieldDef) {
+          errors.push(`unknown field: ${provided.key}`);
+          continue;
+        }
+        if (fieldDef.type === 'number' && isNaN(Number(provided.value))) {
+          errors.push(`${provided.key} must be a number`);
+        }
+        if (fieldDef.type === 'select' && fieldDef.options && !fieldDef.options.includes(provided.value)) {
+          errors.push(`${provided.key} must be one of: ${fieldDef.options.join(', ')}`);
+        }
+      }
+    }
+
+    return { valid: errors.length === 0, errors };
+  }
+
+  /**
+   * Extracts payer field values to store on the payment
+   */
+  extractPayerData(dto: RedeemPaymentLinkDto): {
+    payerName?: string;
+    payerEmail?: string;
+    payerPhone?: string;
+    metadata?: Record<string, string>;
+  } {
+    const metadata: Record<string, string> = {};
+
+    for (const field of dto.customFields || []) {
+      metadata[field.key] = field.value;
+    }
+
+    return {
+      payerName: dto.name,
+      payerEmail: dto.email,
+      payerPhone: dto.phone,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    };
+  }
+
   async create(dto: CreatePaymentLinkDto, merchantId: string): Promise<PaymentLink> {
     if (!dto.flexibleAmount && (dto.amount === undefined || dto.amount === null)) {
       throw new BadRequestException('amount is required when flexibleAmount is not true');
     }
+
+    // Validate slug if provided
+    if (dto.slug) {
+      this.validateSlug(dto.slug);
+
+      // Check for slug conflicts
+      const existing = await this.repo.findOneBy({ slug: dto.slug });
+      if (existing) {
+        throw new ConflictException(`Slug '${dto.slug}' is already in use`);
+      }
+    }
+
     const token = randomBytes(16).toString('hex');
     const link = this.repo.create({
-      ...dto,
       amount: dto.flexibleAmount ? null : dto.amount,
       flexibleAmount: dto.flexibleAmount ?? false,
       minAmount: dto.minAmount ?? null,
-      token,
-      merchantId,
+      currency: dto.currency,
+      description: dto.description ?? null,
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+      token,
+      slug: dto.slug ?? null,
+      merchantId,
+      requiredFields: dto.requiredFields
+        ? { name: dto.requiredFields.name ?? false, email: dto.requiredFields.email ?? false, phone: dto.requiredFields.phone ?? false }
+        : { name: false, email: false, phone: false },
+      customFields: dto.customFields ?? [],
     });
     return this.repo.save(link);
   }
 
-  async findByToken(token: string): Promise<PaymentLink> {
-    const link = await this.repo.findOneBy({ token });
+  /**
+   * Find payment link by token or slug
+   */
+  async findByTokenOrSlug(tokenOrSlug: string): Promise<PaymentLink> {
+    let link = await this.repo.findOneBy({ token: tokenOrSlug });
+    if (!link) {
+      link = await this.repo.findOneBy({ slug: tokenOrSlug });
+    }
     if (!link) throw new NotFoundException('Payment link not found');
     if (!link.isActive) throw new GoneException('Payment link has been deactivated');
     if (link.expiresAt && link.expiresAt < new Date()) {
       throw new GoneException('Payment link has expired');
     }
-    await this.repo.increment({ token }, 'views', 1);
+    await this.repo.increment({ id: link.id }, 'views', 1);
     link.views += 1;
     return link;
   }
 
-  async redeemLink(token: string, payerAmount?: number): Promise<PaymentLink> {
-    const link = await this.findByToken(token);
+  // Keep old method name for backwards compatibility
+  async findByToken(token: string): Promise<PaymentLink> {
+    return this.findByTokenOrSlug(token);
+  }
+
+  async redeemLink(tokenOrSlug: string, dto: RedeemPaymentLinkDto): Promise<PaymentLink> {
+    const link = await this.findByTokenOrSlug(tokenOrSlug);
+
+    // Handle flexible amount
     if (link.flexibleAmount) {
-      if (payerAmount === undefined || payerAmount === null) {
+      if (dto.payerAmount === undefined || dto.payerAmount === null) {
         throw new BadRequestException('payerAmount is required for flexible-amount payment links');
       }
-      if (link.minAmount !== null && payerAmount < Number(link.minAmount)) {
-        throw new BadRequestException(
-          `payerAmount must be at least ${link.minAmount}`,
-        );
+      if (link.minAmount !== null && dto.payerAmount < Number(link.minAmount)) {
+        throw new BadRequestException(`payerAmount must be at least ${link.minAmount}`);
       }
     }
+
+    // Validate required/custom fields
+    const { valid, errors } = this.validatePayerFields(link, dto);
+    if (!valid) {
+      throw new BadRequestException(errors.join('; '));
+    }
+
     return link;
   }
 
@@ -121,9 +244,23 @@ export class PaymentLinksService {
     if (dto.isActive !== undefined) link.isActive = dto.isActive;
     if (dto.amount !== undefined) link.amount = dto.amount;
     if (dto.currency !== undefined) link.currency = dto.currency;
-    if (dto.description !== undefined) link.description = dto.description;
+    if (dto.description !== undefined) link.description = dto.description ?? null;
     if (dto.expiresAt !== undefined) {
       link.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
+    }
+
+    // Update required fields
+    if (dto.requiredFields !== undefined) {
+      link.requiredFields = {
+        name: dto.requiredFields.name ?? false,
+        email: dto.requiredFields.email ?? false,
+        phone: dto.requiredFields.phone ?? false,
+      };
+    }
+
+    // Update custom fields
+    if (dto.customFields !== undefined) {
+      link.customFields = dto.customFields as CustomField[];
     }
 
     return this.repo.save(link);
