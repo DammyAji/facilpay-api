@@ -26,6 +26,7 @@ import { CheckoutSessionsModule } from './modules/checkout-sessions/checkout-ses
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 import { EventsModule } from './modules/events/events.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { EventsModule } from './modules/events/events.module';
     OnboardingModule,
     AuditLogsModule,
     EventsModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

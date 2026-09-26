@@ -1307,6 +1307,135 @@ export class PaymentsService {
     }
   }
 
+  // ─── Sandbox simulation ────────────────────────────────────────────────────
+
+  /**
+   * Forces a payment into a terminal state for sandbox/testnet integration testing.
+   * Runs the exact same side-effect chain as a real status transition:
+   * SSE emit → email notifications → split processing → merchant webhooks.
+   *
+   * Only callable when STELLAR_NETWORK !== 'PUBLIC'.
+   */
+  async simulate(
+    paymentId: string,
+    outcome: import('./dto/simulate-payment.dto').SimulateOutcome,
+    partialAmount?: number,
+  ): Promise<Payment> {
+    const payment = await this.paymentRepository.findOneBy({ id: paymentId });
+    if (!payment) {
+      throw new NotFoundException(`Payment with ID ${paymentId} not found`);
+    }
+
+    const terminalStates: PaymentStatus[] = [
+      PaymentStatus.COMPLETED,
+      PaymentStatus.FAILED,
+      PaymentStatus.CANCELLED,
+      PaymentStatus.REFUNDED,
+      PaymentStatus.PARTIALLY_REFUNDED,
+      PaymentStatus.EXPIRED,
+      PaymentStatus.PARTIALLY_COMPLETED,
+    ];
+
+    if (terminalStates.includes(payment.status)) {
+      throw new ConflictException(
+        `Cannot simulate outcome on payment already in terminal state: ${payment.status}`,
+      );
+    }
+
+    // Stamp metadata so consumers can identify simulated transitions
+    payment.metadata = {
+      ...(payment.metadata ?? {}),
+      simulated: 'true',
+    };
+
+    const previousStatus = payment.status;
+
+    switch (outcome) {
+      case 'COMPLETED': {
+        payment.status = PaymentStatus.COMPLETED;
+        break;
+      }
+      case 'FAILED': {
+        payment.status = PaymentStatus.FAILED;
+        break;
+      }
+      case 'EXPIRED': {
+        payment.status = PaymentStatus.EXPIRED;
+        payment.expiredAt = new Date();
+        break;
+      }
+      case 'PARTIALLY_COMPLETED': {
+        payment.status = PaymentStatus.PARTIALLY_COMPLETED;
+        if (partialAmount !== undefined) {
+          payment.amount = partialAmount;
+          const fee = await this.calculateFee(
+            payment.merchantId ?? undefined,
+            partialAmount,
+          );
+          payment.feeAmount = fee.feeAmount;
+          payment.netAmount = fee.netAmount;
+        }
+        break;
+      }
+    }
+
+    const updated = await this.paymentRepository.save(payment);
+
+    this.logger.info(
+      { paymentId, outcome, previousStatus },
+      'Payment simulation applied',
+    );
+
+    // ── Side effects (same as real status transitions) ─────────────────────
+
+    this.paymentSseService.emit(updated);
+
+    if (
+      updated.status === PaymentStatus.COMPLETED ||
+      updated.status === PaymentStatus.PARTIALLY_COMPLETED
+    ) {
+      await this.sendPaymentConfirmedNotifications(updated);
+      await this.processSplitsForPayment(updated);
+    }
+
+    if (
+      updated.status === PaymentStatus.COMPLETED &&
+      previousStatus !== PaymentStatus.COMPLETED &&
+      updated.paymentLinkId
+    ) {
+      await this.paymentLinksService.incrementCompletions(updated.paymentLinkId);
+    }
+
+    const webhookEvent =
+      updated.status === PaymentStatus.COMPLETED
+        ? 'payment.completed'
+        : updated.status === PaymentStatus.FAILED
+          ? 'payment.failed'
+          : updated.status === PaymentStatus.EXPIRED
+            ? 'payment.expired'
+            : 'payment.partially_completed';
+
+    if (updated.merchantId) {
+      await this.webhooksService
+        .dispatchEventToMerchant(updated.merchantId, webhookEvent, {
+          paymentId: updated.id,
+          amount: updated.amount,
+          currency: updated.currency,
+          status: updated.status,
+          simulated: true,
+          ...(updated.expiredAt && { expiredAt: updated.expiredAt }),
+        })
+        .catch((e) =>
+          this.logger.error(
+            { paymentId, event: webhookEvent },
+            `Failed to dispatch ${webhookEvent} webhook after simulation: ${e?.message}`,
+          ),
+        );
+    }
+
+    return updated;
+  }
+
   private async dispatchRefundWebhook(
     payment: Payment,
     refund: Refund,
