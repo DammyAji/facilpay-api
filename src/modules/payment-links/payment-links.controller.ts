@@ -44,7 +44,7 @@ export class PaymentLinksController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Create a payment link',
-    description: 'Generates a shareable payment link with a unique token.',
+    description: 'Generates a shareable payment link with a unique token. Optionally set maxCompletions to deactivate the link after that many successful payments.',
   })
   @ApiCreatedResponse({ description: 'Payment link created.', type: PaymentLink })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
@@ -72,7 +72,7 @@ export class PaymentLinksController {
   @Post(':token/redeem')
   @ApiOperation({
     summary: 'Redeem a payment link',
-    description: 'Validates the link and, for flexible-amount links, requires a payer-supplied amount.',
+    description: 'Validates the link and, for flexible-amount links, requires a payer-supplied amount. Links at their completion limit are deactivated.',
   })
   @ApiParam({ name: 'token', description: '16-byte hex token from the payment link URL' })
   @ApiOkResponse({ description: 'Payment link ready for checkout.' })
@@ -101,11 +101,12 @@ export class PaymentLinksController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Update a payment link',
-    description: 'Updates editable fields (amount, currency, description, expiresAt) of an existing payment link.',
+    description: 'Updates editable fields (amount, currency, description, expiresAt, isActive) of an existing payment link. Expired links cannot be reactivated.',
   })
   @ApiParam({ name: 'id', description: 'Payment link UUID' })
   @ApiOkResponse({ description: 'Payment link updated.', type: PaymentLink })
   @ApiNotFoundResponse({ description: 'Link not found.' })
+  @ApiResponse({ status: 410, description: 'An expired payment link cannot be reactivated.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
   update(
     @Param('id') id: string,
