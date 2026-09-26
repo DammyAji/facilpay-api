@@ -93,6 +93,10 @@ export class Payment {
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, string> | null = null;
 
+  @Index('IDX_payments_tags', { synchronize: false })
+  @Column({ type: 'text', array: true, default: () => "'{}'" })
+  tags: string[] = [];
+
   @Index()
   @Column({ nullable: true })
   settlementId: string | null = null;
