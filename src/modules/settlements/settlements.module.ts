@@ -9,6 +9,8 @@ import { SettlementsService } from './settlements.service';
 import { SettlementsController } from './settlements.controller';
 import { AdminSettlementsController } from './admin-settlements.controller';
 import { UsersModule } from '../users/users.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
+import { EventsModule } from '../events/events.module';
 import { Payment } from '../payments/payment.entity';
 import { MailService } from '../auth/mail/mail.service';
 import { PayoutDestination } from './entities/payout-destination.entity';
@@ -31,11 +33,11 @@ import { Refund } from '../payments/refund.entity';
       Refund,
     ]),
     UsersModule,
-    StellarModule,
-    AuditLogsModule,
-    AuthModule,
+    WebhooksModule,
+    EventsModule,
   ],
   controllers: [SettlementsController, AdminSettlementsController, PayoutDestinationsController],
   providers: [SettlementsService, MailService],
+  exports: [SettlementsService],
 })
 export class SettlementsModule {}

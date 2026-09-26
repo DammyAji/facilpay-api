@@ -39,6 +39,7 @@ import { WebhooksService } from '../webhooks/webhooks.service';
 import { StellarService } from '../stellar/stellar.service';
 import { UsersService } from '../users/users.service';
 import { SettlementAdjustment } from '../settlements/entities/settlement-adjustment.entity';
+import { EventsService } from '../events/events.service';
 
 const DEFAULT_PAYMENT_EXPIRY_SECONDS = 1800;
 const DEFAULT_MAX_REFUNDS_PER_PAYMENT = 20;
@@ -69,6 +70,7 @@ export class PaymentsService {
     private readonly stellarService: StellarService,
     private readonly usersService: UsersService,
     private readonly paymentLinksService: PaymentLinksService,
+    private readonly eventsService: EventsService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
   }

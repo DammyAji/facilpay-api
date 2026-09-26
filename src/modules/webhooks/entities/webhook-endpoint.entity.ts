@@ -22,6 +22,9 @@ export const WEBHOOK_EVENT_TYPES = [
   'dispute.closed',
   'transaction.multisig_required',
   'transaction.multisig_completed',
+  'settlement.created',
+  'settlement.completed',
+  'settlement.failed',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -55,6 +58,15 @@ export class WebhookEndpoint {
     example: 'whsec_abc123...',
   })
   secret: string;
+
+  @Column({ type: 'int', default: 0 })
+  consecutiveFailures: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  lastFailureAt: Date | null;
+
+  @Column({ length: 64, nullable: true })
+  disabledReason: string | null;
 
   @CreateDateColumn()
   @ApiProperty({ example: '2026-01-26T10:00:00.000Z' })

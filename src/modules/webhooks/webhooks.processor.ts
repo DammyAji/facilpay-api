@@ -8,6 +8,7 @@ import { firstValueFrom } from 'rxjs';
 import { createHmac } from 'crypto';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
+import { WebhooksService } from './webhooks.service';
 import { WebhookDelivery, WebhookDeliveryStatus } from './entities/webhook-delivery.entity';
 import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
 
@@ -22,6 +23,7 @@ export class WebhooksProcessor extends WorkerHost {
     @InjectRepository(WebhookEndpoint)
     private readonly endpointRepo: Repository<WebhookEndpoint>,
     private readonly httpService: HttpService,
+    private readonly webhooksService: WebhooksService,
     appLogger: AppLogger,
   ) {
     super();
@@ -75,11 +77,14 @@ export class WebhooksProcessor extends WorkerHost {
       delivery.lastError = null;
       await this.deliveryRepo.save(delivery);
 
+      // Reset failure counters on success
+      await this.webhooksService.recordDeliverySuccess(endpointId);
+
       this.logger.info(
         { deliveryId, endpointId, attempt, statusCode: response.status },
         'Webhook delivered successfully',
       );
-      
+
       return { success: true, statusCode: response.status };
     } catch (error: any) {
       const statusCode = error?.response?.status ?? null;
@@ -89,13 +94,15 @@ export class WebhooksProcessor extends WorkerHost {
       delivery.lastError = errorMsg;
 
       // Job options specify up to 6 attempts (initial + 5 retries)
+      // Record failure for endpoint auto-disable logic
+      await this.webhooksService.recordDeliveryFailure(endpointId, errorMsg);
+
       if (attempt >= (job.opts.attempts || 6)) {
         delivery.status = WebhookDeliveryStatus.DEAD_LETTER;
         this.logger.error(
           { deliveryId, endpointId, attempt, statusCode, error: errorMsg },
           'Webhook delivery finally failed and moved to dead-letter',
         );
-        // Here we could emit an application event about final failure if we had an event emitter
       } else {
         delivery.status = WebhookDeliveryStatus.FAILED;
         this.logger.warn(

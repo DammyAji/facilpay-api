@@ -1,0 +1,39 @@
+<h2>Upcoming Payment Reminder</h2>
+
+<p>Hello,</p>
+
+<p>This is a reminder that your recurring payment will be processed soon.</p>
+
+<table>
+  <tr>
+    <td><strong>Amount:</strong></td>
+    <td>{{paymentAmount}} {{paymentCurrency}}</td>
+  </tr>
+  <tr>
+    <td><strong>Date:</strong></td>
+    <td>{{chargeDate}}</td>
+  </tr>
+  <tr>
+    <td><strong>Merchant:</strong></td>
+    <td>{{merchantEmail}}</td>
+  </tr>
+  {{#if planDescription}}
+  <tr>
+    <td><strong>Description:</strong></td>
+    <td>{{planDescription}}</td>
+  </tr>
+  {{/if}}
+</table>
+
+<p>
+  <a href="{{manageUrl}}">Manage Subscription</a> |
+  <a href="{{cancelUrl}}">Cancel Subscription</a>
+</p>
+
+<p>
+  If you did not expect this charge or wish to cancel, please click the links above.
+</p>
+
+<p>
+  {{> footer}}
+</p>

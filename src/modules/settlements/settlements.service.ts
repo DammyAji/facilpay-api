@@ -14,18 +14,12 @@ import { GetSettlementsDto } from './dto/get-settlements.dto';
 import { Payment, PaymentStatus } from '../payments/payment.entity';
 import { MailService } from '../auth/mail/mail.service';
 import { UsersService } from '../users/users.service';
-import { PayoutDestination } from './entities/payout-destination.entity';
-import { CreatePayoutDestinationDto } from './dto/create-payout-destination.dto';
-import { VerifyPayoutDestinationDto } from './dto/verify-payout-destination.dto';
-import { StellarService } from '../stellar/stellar.service';
-import { AuditLogsService } from '../audit-logs/audit-logs.service';
-import { AuthService } from '../auth/auth.service';
-import { createHash, randomBytes } from 'crypto';
-import { Refund } from '../payments/refund.entity';
-import { SettlementStatementRow } from '../payments/export/payments-exporter';
+import { WebhooksService } from '../webhooks/webhooks.service';
 import {
   PaginatedResult,
 } from '../../common/interfaces/paginated-result.interface';
+import { EventsService } from '../events/events.service';
+import { SettlementStatus } from './entities/settlement.entity';
 
 @Injectable()
 export class SettlementsService {
@@ -49,9 +43,8 @@ export class SettlementsService {
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
     private readonly configService: ConfigService,
-    private readonly stellarService: StellarService,
-    private readonly auditLogsService: AuditLogsService,
-    private readonly authService: AuthService,
+    private readonly webhooksService: WebhooksService,
+    private readonly eventsService: EventsService,
   ) {
     this.settleOnGross =
       String(
@@ -531,6 +524,7 @@ export class SettlementsService {
         payoutDestinationId: lockedConfig.destinationId,
         paymentIds: completedPayments.map((p) => p.id),
         processedAt: new Date(),
+        status: SettlementStatus.PENDING,
       });
 
       const savedSettlement = await queryRunner.manager.save(settlement);
@@ -544,18 +538,80 @@ export class SettlementsService {
       lockedConfig.lastSettledAt = new Date();
       await queryRunner.manager.save(lockedConfig);
 
+      // Mark settlement as completed
+      savedSettlement.status = SettlementStatus.COMPLETED;
+      await this.settlementRepo.save(savedSettlement);
+
       await queryRunner.commitTransaction();
+
+      // Send webhook and persist event (outside transaction)
+      await this.dispatchSettlementEvents(savedSettlement, completedPayments.length, null);
 
       // Send email outside the transaction (non-critical operation)
       await this.sendSettlementEmail(lockedConfig.userId, savedSettlement, totalAmount);
 
       return savedSettlement;
     } catch (error) {
+      // Log failed settlement
+      const userId = config.userId;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Create a failed settlement record if possible
+      try {
+        const failedSettlement = this.settlementRepo.create({
+          merchantId: userId,
+          schedule: config.schedule,
+          totalAmount: 0,
+          currency: config.currency,
+          paymentIds: [],
+          processedAt: new Date(),
+          status: SettlementStatus.FAILED,
+          failureReason: errorMessage,
+        });
+        const savedFailed = await this.settlementRepo.save(failedSettlement);
+        await this.dispatchSettlementEvents(savedFailed, 0, errorMessage);
+      } catch {
+        // Ignore - we're already in an error state
+      }
+
       await queryRunner.rollbackTransaction();
       throw error;
     } finally {
       await queryRunner.release();
     }
+  }
+
+  private async dispatchSettlementEvents(
+    settlement: Settlement,
+    paymentCount: number,
+    failureReason: string | null,
+  ): Promise<void> {
+    const payload = {
+      settlementId: settlement.id,
+      amount: String(settlement.totalAmount),
+      currency: settlement.currency,
+      paymentCount,
+      stellarTransactionHash: settlement.stellarTransactionHash,
+      failureReason,
+    };
+
+    // Persist domain event
+    this.eventsService.emit(settlement.merchantId, 'settlement.created', payload);
+
+    if (settlement.status === SettlementStatus.COMPLETED) {
+      this.eventsService.emit(settlement.merchantId, 'settlement.completed', payload);
+    } else if (settlement.status === SettlementStatus.FAILED) {
+      this.eventsService.emit(settlement.merchantId, 'settlement.failed', payload);
+    }
+
+    // Dispatch webhook
+    const event = settlement.status === SettlementStatus.COMPLETED
+      ? 'settlement.completed'
+      : settlement.status === SettlementStatus.FAILED
+        ? 'settlement.failed'
+        : 'settlement.created';
+
+    await this.webhooksService.dispatchEventToMerchant(settlement.merchantId, event, payload);
   }
 
   private async sendSettlementEmail(
