@@ -20,6 +20,7 @@ export enum PaymentStatus {
 }
 
 @Entity('payments')
+@Index('IDX_payments_customerId_createdAt', ['customerId', 'createdAt'])
 export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -69,6 +70,13 @@ export class Payment {
 
   @Column({ nullable: true })
   merchantId: string | null = null;
+
+  @Column({ nullable: true, length: 200 })
+  customerId: string | null = null;
+
+  @Index('IDX_payments_recurringPaymentId')
+  @Column({ type: 'uuid', nullable: true })
+  recurringPaymentId: string | null = null;
 
   @Column({ nullable: true })
   merchantEmail: string | null = null;

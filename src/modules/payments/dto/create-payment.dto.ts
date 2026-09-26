@@ -170,6 +170,16 @@ export class CreatePaymentDto {
   })
   merchantId?: string;
 
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  @ApiPropertyOptional({
+    description: 'ID of the customer associated with this payment',
+    example: 'cust_456',
+    maxLength: 200,
+  })
+  customerId?: string;
+
   @IsEmail()
   @IsOptional()
   @ApiPropertyOptional({

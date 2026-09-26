@@ -5,6 +5,7 @@ import {
   Patch,
   Body,
   Param,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +16,7 @@ import {
   ApiCreatedResponse,
   ApiOkResponse,
   ApiParam,
+  ApiQuery,
   ApiNotFoundResponse,
   ApiConflictResponse,
 } from '@nestjs/swagger';
@@ -23,6 +25,7 @@ import { CreateRecurringPaymentDto } from './dto/create-recurring-payment.dto';
 import { UpdateRecurringPaymentDto } from './dto/update-recurring-payment.dto';
 import { RecurringPayment } from './recurring-payment.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PaginationDto } from '../../common/dto/pagination.dto';
 
 @ApiTags('recurring-payments')
 @Controller('v1/recurring-payments')
@@ -54,6 +57,26 @@ export class RecurringPaymentsController {
   })
   findAll(@Request() req: any) {
     return this.service.findAll(req.user.id);
+  }
+
+  @Get(':id/charges')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'List recurring payment charge attempts',
+    description:
+      'Returns charge attempts for a plan in chronological order, including failed attempts and their failure reasons.',
+  })
+  @ApiParam({ name: 'id', description: 'Recurring payment plan UUID' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiOkResponse({ description: 'Paginated recurring payment charge history.' })
+  @ApiNotFoundResponse({ description: 'Plan not found.' })
+  findCharges(
+    @Param('id') id: string,
+    @Query() pagination: PaginationDto,
+    @Request() req: any,
+  ) {
+    return this.service.findCharges(id, req.user.id, pagination);
   }
 
   @Get(':id')

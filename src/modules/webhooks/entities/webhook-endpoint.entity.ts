@@ -25,6 +25,7 @@ export const WEBHOOK_EVENT_TYPES = [
   'settlement.created',
   'settlement.completed',
   'settlement.failed',
+  'recurring.trial_ending',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

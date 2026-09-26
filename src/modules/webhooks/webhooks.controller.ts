@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -35,6 +36,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { ConfigService } from '@nestjs/config';
+import { ReplayWebhooksDto } from './dto/replay-webhooks.dto';
 
 @ApiTags('webhooks')
 @ApiBearerAuth('bearer')
@@ -319,6 +321,40 @@ export class WebhooksController {
     @CurrentUser() user: User,
   ): Promise<void> {
     return this.webhooksService.retryFailedDelivery(deliveryId, user.id);
+  }
+
+  @Post(':id/replay')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Replay webhook events in a time range',
+    description:
+      'Queues matching events in chronological order. Replay windows are limited to 7 days and 10000 events.',
+  })
+  @ApiParam({ name: 'id', description: 'Webhook endpoint UUID' })
+  @ApiBody({ type: ReplayWebhooksDto })
+  @ApiResponse({ status: HttpStatus.ACCEPTED, description: 'Replay queued.' })
+  @ApiBadRequestResponse({ description: 'Invalid replay window or event limit exceeded.' })
+  @ApiNotFoundResponse({ description: 'Webhook endpoint not found.' })
+  @ApiForbiddenResponse({ description: 'Endpoint belongs to a different merchant.' })
+  replay(
+    @Param('id') id: string,
+    @Body() dto: ReplayWebhooksDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.webhooksService.replayEvents(id, user.id, dto);
+  }
+
+  @Get('replays/:jobId')
+  @ApiOperation({ summary: 'Get webhook replay progress' })
+  @ApiParam({ name: 'jobId', description: 'Replay job UUID' })
+  @ApiOkResponse({ description: 'Current replay progress.' })
+  @ApiNotFoundResponse({ description: 'Replay job not found.' })
+  @ApiForbiddenResponse({ description: 'Replay belongs to a different merchant.' })
+  getReplayProgress(
+    @Param('jobId') jobId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.webhooksService.getReplayProgress(jobId, user.id);
   }
 
   @Post(':id/enable')

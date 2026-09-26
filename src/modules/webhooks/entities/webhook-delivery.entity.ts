@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
@@ -23,6 +24,10 @@ export class WebhookDelivery {
 
   @Column()
   endpointId: string;
+
+  @Index('IDX_webhook_deliveries_replayId')
+  @Column({ type: 'uuid', nullable: true })
+  replayId: string | null = null;
 
   @ManyToOne(() => WebhookEndpoint, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'endpointId' })

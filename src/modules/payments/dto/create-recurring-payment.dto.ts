@@ -12,6 +12,7 @@ import {
   Max,
   MaxLength,
   IsPositive,
+  IsInt,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
@@ -50,6 +51,19 @@ export class CreateRecurringPaymentDto {
     example: RecurringPaymentInterval.MONTHLY,
   })
   interval: RecurringPaymentInterval;
+
+  @IsInt()
+  @IsOptional()
+  @Min(0, { message: 'trialDays must be at least 0' })
+  @Max(365, { message: 'trialDays must be at most 365' })
+  @ApiPropertyOptional({
+    description: 'Number of free trial days before the first charge',
+    example: 14,
+    minimum: 0,
+    maximum: 365,
+    default: 0,
+  })
+  trialDays?: number;
 
   @IsString()
   @IsOptional()
