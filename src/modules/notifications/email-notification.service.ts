@@ -262,4 +262,114 @@ export class EmailNotificationService {
       removeOnFail: false,
     });
   }
+
+  /**
+   * Send invoice reminder email with merchant branding
+   */
+  async sendInvoiceReminder(
+    to: string,
+    branding: {
+      displayName: string;
+      logo: string | null;
+      primaryColor: string;
+      supportEmail: string | null;
+      supportUrl: string | null;
+    },
+    data: {
+      paymentId: string;
+      amount: string;
+      currency: string;
+      dueDate: string;
+      reminderType: 'BEFORE' | 'ON_DUE' | 'AFTER';
+      daysUntilDue?: number;
+    },
+  ): Promise<void> {
+    let subject: string;
+    let previewText: string;
+
+    switch (data.reminderType) {
+      case 'BEFORE':
+        subject = `Reminder: Invoice due in ${data.daysUntilDue} days`;
+        previewText = `Your invoice from ${branding.displayName} is due soon.`;
+        break;
+      case 'ON_DUE':
+        subject = 'Invoice due today';
+        previewText = `Your invoice from ${branding.displayName} is due today.`;
+        break;
+      case 'AFTER':
+        subject = 'Urgent: Invoice overdue';
+        previewText = `Your invoice from ${branding.displayName} is now overdue.`;
+        break;
+    }
+
+    await this.enqueue({
+      to,
+      subject,
+      templateName: 'invoice-reminder',
+      templateData: {
+        merchantName: branding.displayName,
+        merchantLogo: branding.logo,
+        primaryColor: branding.primaryColor,
+        supportEmail: branding.supportEmail,
+        supportUrl: branding.supportUrl,
+        paymentId: data.paymentId,
+        amount: data.amount,
+        currency: data.currency,
+        dueDate: data.dueDate,
+        previewText,
+      },
+      eventType: EmailEventType.PAYMENT_RECEIVED, // Could add new type
+      recipientRole: 'payer',
+      paymentId: data.paymentId,
+      includeUnsubscribe: true,
+    });
+  }
+
+  /**
+   * Send payment confirmation with merchant branding
+   */
+  async sendPayerPaymentConfirmedWithBranding(
+    to: string,
+    branding: {
+      displayName: string;
+      logo: string | null;
+      primaryColor: string;
+      supportEmail: string | null;
+      supportUrl: string | null;
+    },
+    data: {
+      payerName: string | null;
+      paymentId: string;
+      amount: string;
+      currency: string;
+      description: string | null;
+    },
+  ): Promise<void> {
+    await this.enqueue({
+      to,
+      subject: `Payment Confirmed: ${data.amount} ${data.currency}`,
+      templateName: 'payer-payment-confirmed',
+      templateData: {
+        merchantName: branding.displayName,
+        merchantLogo: branding.logo,
+        primaryColor: branding.primaryColor,
+        supportEmail: branding.supportEmail,
+        supportUrl: branding.supportUrl,
+        payerName: data.payerName || undefined,
+        paymentAmount: data.amount,
+        paymentCurrency: data.currency,
+        paymentId: data.paymentId,
+        paymentDescription: data.description || undefined,
+        date: new Date().toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        }),
+      },
+      eventType: EmailEventType.PAYMENT_CONFIRMED,
+      recipientRole: 'payer',
+      paymentId: data.paymentId,
+      includeUnsubscribe: true,
+    });
+  }
 }

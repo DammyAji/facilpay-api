@@ -31,6 +31,8 @@ import { RecurringPaymentsService } from './recurring-payments.service';
 import { RecurringPaymentsController } from './recurring-payments.controller';
 import { MerchantFeesController } from './merchant-fees.controller';
 import { InvoiceService } from './invoice.service';
+import { InvoiceReminder } from './invoice-reminder.entity';
+import { InvoiceReminderService } from './invoice-reminder.service';
 
 @Module({
   imports: [
@@ -45,6 +47,7 @@ import { InvoiceService } from './invoice.service';
       Dispute,
       RecurringPayment,
       SettlementAdjustment,
+      InvoiceReminder,
     ]),
     WebhooksModule,
     StellarModule,
@@ -72,6 +75,7 @@ import { InvoiceService } from './invoice.service';
     PaymentSseService,
     RecurringPaymentsService,
     InvoiceService,
+    InvoiceReminderService,
   ],
   exports: [
     PaymentsService,

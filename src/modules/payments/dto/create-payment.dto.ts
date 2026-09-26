@@ -11,10 +11,12 @@ import {
   IsObject,
   IsInt,
   IsArray,
+  IsBoolean,
+  IsDateString,
   ArrayMinSize,
   ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
 import { CreatePaymentSplitDto } from './create-payment-split.dto';
@@ -227,4 +229,20 @@ export class CreatePaymentDto {
     type: [CreatePaymentSplitDto],
   })
   splits?: CreatePaymentSplitDto[];
+
+  @IsOptional()
+  @IsDateString({}, { message: 'dueDate must be a valid ISO 8601 date string' })
+  @ApiPropertyOptional({
+    description: 'Invoice due date for reminder system (ISO 8601)',
+    example: '2026-02-01T00:00:00.000Z',
+  })
+  dueDate?: string;
+
+  @IsOptional()
+  @IsBoolean({ message: 'remindersEnabled must be a boolean' })
+  @ApiPropertyOptional({
+    description: 'Whether to send payment reminders (default: true)',
+    default: true,
+  })
+  remindersEnabled?: boolean;
 }
