@@ -5,10 +5,16 @@ import {
   Min,
   MaxLength,
   IsPositive,
+  IsEnum,
 } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { RefundReasonCode } from '../refund.entity';
 
 export class RefundPaymentDto {
+  @IsEnum(RefundReasonCode)
+  @ApiProperty({ enum: RefundReasonCode, example: RefundReasonCode.OTHER })
+  reasonCode: RefundReasonCode;
+
   @IsNumber()
   @IsOptional()
   @IsPositive({ message: 'Refund amount must be a positive number' })

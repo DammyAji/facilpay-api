@@ -117,6 +117,30 @@ export class StellarService {
     }
   }
 
+  async validatePayoutDestination(address: string, assetCode: string): Promise<void> {
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(address)) {
+      throw new BadRequestException('Invalid Stellar payout address');
+    }
+
+    let account: StellarSdk.Horizon.AccountResponse;
+    try {
+      account = await this.server.loadAccount(address);
+    } catch {
+      throw new BadRequestException('Stellar payout account does not exist');
+    }
+
+    if (assetCode.toUpperCase() === 'XLM') return;
+
+    const hasTrustline = account.balances.some(
+      (balance: any) => balance.asset_code === assetCode,
+    );
+    if (!hasTrustline) {
+      throw new BadRequestException(
+        `Stellar payout account has no trustline for ${assetCode}`,
+      );
+    }
+  }
+
   async listTransactions(status?: MultiSigTransactionStatus): Promise<MultiSigTransaction[]> {
     return this.multiSigRepo.find({
       where: status ? { status } : {},

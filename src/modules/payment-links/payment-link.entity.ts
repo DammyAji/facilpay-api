@@ -74,11 +74,8 @@ export class PaymentLink {
   @Column({ default: 0 })
   completions: number;
 
-  @Column({ type: 'jsonb', default: { name: false, email: false, phone: false } })
-  requiredFields: PaymentLinkRequiredFields = { name: false, email: false, phone: false };
-
-  @Column({ type: 'jsonb', default: [] })
-  customFields: CustomField[] = [];
+  @Column({ type: 'integer', nullable: true })
+  maxCompletions: number | null = null;
 
   @Column()
   merchantId: string;

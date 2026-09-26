@@ -6,6 +6,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
+import { ConfigService } from '@nestjs/config';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
@@ -14,10 +15,14 @@ import { CreateWebhookEndpointDto } from './dto/create-webhook-endpoint.dto';
 import { UpdateWebhookEndpointDto } from './dto/update-webhook-endpoint.dto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class WebhooksService {
   private readonly logger: Logger;
+  private readonly disableFailureThreshold: number;
+  private readonly disableTimeWindowHours: number;
 
   constructor(
     @InjectRepository(WebhookEndpoint)
@@ -25,9 +30,18 @@ export class WebhooksService {
     @InjectRepository(WebhookDelivery)
     private readonly deliveryRepo: Repository<WebhookDelivery>,
     @InjectQueue('webhooks') private readonly webhooksQueue: Queue,
+    private readonly emailNotificationService: EmailNotificationService,
+    private readonly configService: ConfigService,
+    private readonly usersService: UsersService,
     appLogger: AppLogger,
   ) {
     this.logger = appLogger.child({ module: WebhooksService.name });
+    this.disableFailureThreshold = Number(
+      this.configService.get('WEBHOOK_DISABLE_FAILURE_THRESHOLD', 50),
+    );
+    this.disableTimeWindowHours = Number(
+      this.configService.get('WEBHOOK_DISABLE_TIME_WINDOW_HOURS', 24),
+    );
   }
 
   async create(dto: CreateWebhookEndpointDto, merchantId: string): Promise<WebhookEndpoint> {
@@ -88,16 +102,16 @@ export class WebhooksService {
     return { delivered: false, statusCode: null, error: 'Queued for delivery' };
   }
 
-  async dispatchEventToMerchant(merchantId: string, event: string, data: any): Promise<void> {
+  async dispatchEventToMerchant(merchantId: string, event: string, data: any, eventId?: string): Promise<void> {
     const endpoints = await this.repo.find({ where: { merchantId, isActive: true } });
     const payload = {
       event,
       timestamp: new Date().toISOString(),
       data,
+      eventId,
     };
 
     for (const endpoint of endpoints) {
-      // Only deliver to endpoints subscribed to this event type
       if (endpoint.events.includes(event as any)) {
         await this.dispatchEventToEndpoint(endpoint, payload);
       }
@@ -121,15 +135,92 @@ export class WebhooksService {
         payload,
       },
       {
-        attempts: 6, // 1 initial + 5 retries
+        attempts: 6,
         backoff: {
           type: 'exponential',
           delay: 1000,
         },
-        removeOnComplete: true, // we store the state in the DB
+        removeOnComplete: true,
         removeOnFail: false,
-      }
+      },
     );
+  }
+
+  async recordDeliveryFailure(endpointId: string, error: string): Promise<void> {
+    const endpoint = await this.repo.findOneBy({ id: endpointId });
+    if (!endpoint || !endpoint.isActive) return;
+
+    const now = new Date();
+    const hoursSinceLastFailure = endpoint.lastFailureAt
+      ? (now.getTime() - new Date(endpoint.lastFailureAt).getTime()) / (1000 * 60 * 60)
+      : this.disableTimeWindowHours + 1;
+
+    if (hoursSinceLastFailure > this.disableTimeWindowHours) {
+      endpoint.consecutiveFailures = 0;
+    }
+
+    endpoint.consecutiveFailures += 1;
+    endpoint.lastFailureAt = now;
+
+    if (
+      endpoint.consecutiveFailures >= this.disableFailureThreshold &&
+      hoursSinceLastFailure <= this.disableTimeWindowHours
+    ) {
+      endpoint.isActive = false;
+      endpoint.disabledReason = 'too_many_failures';
+      await this.notifyEndpointDisabled(endpoint, error);
+    }
+
+    await this.repo.save(endpoint);
+  }
+
+  async recordDeliverySuccess(endpointId: string): Promise<void> {
+    const endpoint = await this.repo.findOneBy({ id: endpointId });
+    if (!endpoint) return;
+
+    endpoint.consecutiveFailures = 0;
+    endpoint.lastFailureAt = null;
+    await this.repo.save(endpoint);
+  }
+
+  private async notifyEndpointDisabled(endpoint: WebhookEndpoint, lastError: string): Promise<void> {
+    const appUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
+    const reenableUrl = `${appUrl}/v1/webhooks/${endpoint.id}/enable`;
+
+    try {
+      const user = await this.usersService.findOne(endpoint.merchantId);
+      if (user?.email) {
+        await this.emailNotificationService.sendWebhookEndpointDisabled(
+          user.email,
+          endpoint.url,
+          endpoint.consecutiveFailures,
+          lastError,
+          reenableUrl,
+        );
+      }
+    } catch (error) {
+      this.logger.error(
+        { endpointId: endpoint.id, merchantId: endpoint.merchantId },
+        'Failed to notify merchant about disabled endpoint',
+      );
+    }
+  }
+
+  async reenableEndpoint(id: string, merchantId: string): Promise<WebhookEndpoint> {
+    const endpoint = await this.findOwned(id, merchantId);
+
+    if (endpoint.isActive && !endpoint.disabledReason) {
+      return endpoint;
+    }
+
+    endpoint.isActive = true;
+    endpoint.disabledReason = null;
+    endpoint.consecutiveFailures = 0;
+    endpoint.lastFailureAt = null;
+
+    const updated = await this.repo.save(endpoint);
+    this.logger.info({ endpointId: id, merchantId }, 'Webhook endpoint re-enabled');
+    return updated;
   }
 
   async retryFailedDelivery(deliveryId: string, merchantId: string): Promise<void> {
@@ -141,7 +232,6 @@ export class WebhooksService {
       throw new NotFoundException(`Webhook delivery ${deliveryId} not found`);
     }
 
-    // Verify that the delivery's parent endpoint belongs to the authenticated merchant
     if (delivery.endpoint.merchantId !== merchantId) {
       throw new ForbiddenException();
     }
@@ -168,7 +258,7 @@ export class WebhooksService {
         },
         removeOnComplete: true,
         removeOnFail: false,
-      }
+      },
     );
 
     this.logger.info({ deliveryId, merchantId }, 'Webhook delivery scheduled for manual retry');

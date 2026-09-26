@@ -16,9 +16,16 @@ All webhook management endpoints live under `/v1/webhooks` and require a valid J
 | `payment.expired`        | A payment expires without completion         |
 | `payment.split_processed`| A split payment is processed                 |
 | `refund.issued`          | A full or partial refund is committed        |
+| `refund.failed`          | A refund's Stellar submission fails          |
 | `dispute.opened`         | A dispute is opened on a payment             |
+| `dispute.updated`        | A dispute changes status                     |
+| `dispute.resolved`       | A dispute is resolved                        |
+| `dispute.closed`         | A dispute is closed                          |
 | `transaction.multisig_required`  | A multi-sig transaction is pending additional signatures (threshold not yet met) |
 | `transaction.multisig_completed`  | A multi-sig transaction has gathered all required signatures and been submitted   |
+| `settlement.created`     | A settlement is created                      |
+| `settlement.completed`   | A settlement payout completes successfully   |
+| `settlement.failed`      | A settlement payout fails                    |
 
 ## Endpoint Management
 
@@ -197,6 +204,43 @@ Every webhook delivery uses the same envelope:
 | `data`      | `object` | Event-specific payload (entity snapshots)    |
 
 The `data` object mirrors the persisted entity state at the moment of dispatch — consumers can use it directly without a follow-up API call.
+
+### Dispute and Refund Lifecycle Payloads
+
+Dispute lifecycle events use this payload shape:
+
+```json
+{
+  "event": "dispute.updated",
+  "timestamp": "2026-01-26T13:00:00.000Z",
+  "data": {
+    "disputeId": "789e4567-e89b-12d3-a456-426614174000",
+    "paymentId": "123e4567-e89b-12d3-a456-426614174000",
+    "status": "under_review",
+    "reason": "fraud",
+    "disputedAmount": "100.00",
+    "timestamp": "2026-01-26T13:00:00.000Z"
+  }
+}
+```
+
+`dispute.resolved` and `dispute.closed` use the same shape with the corresponding terminal status. A status transition emits `dispute.updated` and, for those terminal states, the matching terminal event.
+
+Refund lifecycle events use this payload shape:
+
+```json
+{
+  "event": "refund.failed",
+  "timestamp": "2026-01-26T11:00:00.000Z",
+  "data": {
+    "payment": { "id": "123e4567-e89b-12d3-a456-426614174000", "currency": "USD", "status": "PARTIALLY_REFUNDED" },
+    "refund": { "id": "456e7890-e89b-12d3-a456-426614174000", "amount": "50.00", "reasonCode": "REQUESTED_BY_CUSTOMER", "reason": "Customer requested refund" },
+    "status": "failed",
+    "failureReason": "Stellar transaction rejected",
+    "timestamp": "2026-01-26T11:00:00.000Z"
+  }
+}
+```
 
 ## Request Headers
 

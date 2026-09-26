@@ -189,7 +189,16 @@ export class PaymentLinksService {
   }
 
   async incrementCompletions(id: string): Promise<void> {
-    await this.repo.increment({ id }, 'completions', 1);
+    await this.repo
+      .createQueryBuilder()
+      .update(PaymentLink)
+      .set({
+        completions: () => '"completions" + 1',
+        isActive: () =>
+          'CASE WHEN "maxCompletions" IS NOT NULL AND "completions" + 1 >= "maxCompletions" THEN false ELSE "isActive" END',
+      })
+      .where('id = :id', { id })
+      .execute();
   }
 
   async deactivate(id: string, merchantId: string): Promise<void> {
@@ -228,25 +237,11 @@ export class PaymentLinksService {
     if (!link) throw new NotFoundException('Payment link not found');
     if (link.merchantId !== merchantId) throw new ForbiddenException();
 
-    // Handle slug update
-    if (dto.slug !== undefined) {
-      if (dto.slug) {
-        this.validateSlug(dto.slug);
-        // Check for conflicts (excluding current link)
-        const existing = await this.repo
-          .createQueryBuilder('pl')
-          .where('pl.slug = :slug', { slug: dto.slug })
-          .andWhere('pl.id != :id', { id })
-          .getOne();
-        if (existing) {
-          throw new ConflictException(`Slug '${dto.slug}' is already in use`);
-        }
-        link.slug = dto.slug;
-      } else {
-        link.slug = null;
-      }
+    if (dto.isActive === true && !link.isActive && link.expiresAt && link.expiresAt <= new Date()) {
+      throw new GoneException('Expired payment links cannot be reactivated');
     }
 
+    if (dto.isActive !== undefined) link.isActive = dto.isActive;
     if (dto.amount !== undefined) link.amount = dto.amount;
     if (dto.currency !== undefined) link.currency = dto.currency;
     if (dto.description !== undefined) link.description = dto.description ?? null;

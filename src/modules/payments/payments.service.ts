@@ -15,7 +15,7 @@ import {
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { Payment, PaymentStatus } from './payment.entity';
-import { Refund } from './refund.entity';
+import { Refund, RefundReasonCode } from './refund.entity';
 import { Dispute, DisputeStatus } from './dispute.entity';
 import { PaymentSplit, PaymentSplitStatus } from './payment-split.entity';
 import { MerchantFeeConfig } from './merchant-fee-config.entity';
@@ -39,6 +39,7 @@ import { WebhooksService } from '../webhooks/webhooks.service';
 import { StellarService } from '../stellar/stellar.service';
 import { UsersService } from '../users/users.service';
 import { SettlementAdjustment } from '../settlements/entities/settlement-adjustment.entity';
+import { EventsService } from '../events/events.service';
 
 const DEFAULT_PAYMENT_EXPIRY_SECONDS = 1800;
 const DEFAULT_MAX_REFUNDS_PER_PAYMENT = 20;
@@ -69,6 +70,7 @@ export class PaymentsService {
     private readonly stellarService: StellarService,
     private readonly usersService: UsersService,
     private readonly paymentLinksService: PaymentLinksService,
+    private readonly eventsService: EventsService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
   }
@@ -647,6 +649,41 @@ export class PaymentsService {
     });
   }
 
+  async getRefundReport(from?: string, to?: string) {
+    const query = this.refundRepository
+      .createQueryBuilder('refund')
+      .innerJoin(Payment, 'payment', 'payment.id = refund."paymentId"')
+      .select('refund."reasonCode"', 'reasonCode')
+      .addSelect('payment.currency', 'currency')
+      .addSelect('COUNT(refund.id)', 'count')
+      .addSelect('COALESCE(SUM(refund.amount), 0)', 'amount')
+      .groupBy('refund."reasonCode"')
+      .addGroupBy('payment.currency')
+      .orderBy('refund."reasonCode"', 'ASC')
+      .addOrderBy('payment.currency', 'ASC');
+
+    if (from) {
+      query.andWhere('refund."createdAt" >= :from', { from });
+    }
+    if (to) {
+      query.andWhere('refund."createdAt" <= :to', { to });
+    }
+
+    const rows = await query.getRawMany<{
+      reasonCode: RefundReasonCode;
+      currency: string;
+      count: string;
+      amount: string;
+    }>();
+
+    return rows.map((row) => ({
+      reasonCode: row.reasonCode,
+      currency: row.currency,
+      count: Number(row.count),
+      amount: Number(Number(row.amount).toFixed(2)),
+    }));
+  }
+
   /**
    * Returns a chronological timeline of events for a given payment.
    * Aggregates data from the payment itself, its refunds, and disputes,
@@ -766,6 +803,8 @@ export class PaymentsService {
     initiatedBy?: string,
   ): Promise<{ payment: Payment; refund: Refund }> {
     const queryRunner = this.dataSource.createQueryRunner();
+    let attemptedRefund: Refund | null = null;
+    let refundPayment: Payment | null = null;
 
     try {
       await queryRunner.connect();
@@ -776,6 +815,7 @@ export class PaymentsService {
       if (!payment) {
         throw new NotFoundException(`Payment with ID ${id} not found`);
       }
+      refundPayment = payment;
 
       if (payment.status === PaymentStatus.PENDING) {
         throw new ConflictException(
@@ -825,9 +865,11 @@ export class PaymentsService {
       const refund = queryRunner.manager.create(Refund, {
         paymentId: id,
         amount: refundAmount,
+        reasonCode: refundDto.reasonCode,
         reason: refundDto.reason,
         initiatedBy: initiatedBy ?? null,
       });
+      attemptedRefund = refund;
 
       const savedRefund = await queryRunner.manager.save(refund);
 
@@ -867,10 +909,19 @@ export class PaymentsService {
       this.paymentSseService.emit(updatedPayment);
 
       await this.sendRefundNotifications(updatedPayment, savedRefund);
+      await this.dispatchRefundWebhook(updatedPayment, savedRefund, 'refund.issued');
 
       return { payment: updatedPayment, refund: savedRefund };
     } catch (error) {
       await queryRunner.rollbackTransaction();
+      if (attemptedRefund && refundPayment?.merchantId) {
+        await this.dispatchRefundWebhook(
+          refundPayment,
+          attemptedRefund,
+          'refund.failed',
+          error,
+        );
+      }
       this.logger.error(`Refund failed and rolled back: ${error.message}`);
       throw error;
     } finally {
@@ -1254,5 +1305,28 @@ export class PaymentsService {
         )
         .catch(() => {});
     }
+  }
+
+  private async dispatchRefundWebhook(
+    payment: Payment,
+    refund: Refund,
+    event: 'refund.issued' | 'refund.failed',
+    error?: unknown,
+  ): Promise<void> {
+    if (!payment.merchantId) return;
+
+    await this.webhooksService
+      .dispatchEventToMerchant(payment.merchantId, event, {
+        payment,
+        refund,
+        status: event === 'refund.issued' ? 'issued' : 'failed',
+        failureReason: error instanceof Error ? error.message : undefined,
+        timestamp: new Date().toISOString(),
+      })
+      .catch((webhookError) => {
+        this.logger.error(
+          `Failed to dispatch ${event} webhook: ${webhookError instanceof Error ? webhookError.message : 'Unknown error'}`,
+        );
+      });
   }
 }

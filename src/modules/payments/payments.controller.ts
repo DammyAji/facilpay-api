@@ -620,6 +620,7 @@ export class PaymentsController {
           id: '456e7890-e89b-12d3-a456-426614174000',
           paymentId: '123e4567-e89b-12d3-a456-426614174000',
           amount: '100.00',
+          reasonCode: 'REQUESTED_BY_CUSTOMER',
           reason: 'Customer requested refund',
           initiatedBy: '789e0123-e89b-12d3-a456-426614174000',
           createdAt: '2026-01-26T11:00:00.000Z',

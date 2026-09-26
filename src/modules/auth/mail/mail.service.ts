@@ -63,6 +63,24 @@ export class MailService {
     });
   }
 
+  async sendPayoutDestinationVerificationEmail(
+    to: string,
+    destinationId: string,
+    label: string,
+    token: string,
+  ): Promise<void> {
+    const appUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
+    const verifyUrl = `${appUrl}/v1/settlements/destinations/${destinationId}/verify?token=${encodeURIComponent(token)}`;
+
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('SMTP_FROM', '"FacilPay" <noreply@facilpay.com>'),
+      to,
+      subject: 'Confirm your FacilPay payout destination',
+      text: `Confirm the payout destination "${label}" by opening: ${verifyUrl}. This link expires in 24 hours.`,
+      html: `<p>Confirm the payout destination <strong>${label}</strong> by clicking the link below.</p><p><a href="${verifyUrl}">${verifyUrl}</a></p><p>This link expires in 24 hours.</p>`,
+    });
+  }
+
   async sendPasswordResetEmail(to: string, token: string): Promise<void> {
     const appUrl = this.configService.get<string>(
       'APP_URL',

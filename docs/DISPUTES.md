@@ -230,9 +230,22 @@ Webhooks are fired automatically when dispute status changes. The webhook payloa
 ### Webhook Events
 
 - `dispute.opened` - Fired when a new dispute is created
-- `dispute.under_review` - Fired when dispute status changes to under_review
-- `dispute.resolved` - Fired when dispute status changes to resolved
-- `dispute.closed` - Fired when dispute status changes to closed
+- `dispute.updated` - Fired whenever a dispute status changes, including `under_review`
+- `dispute.resolved` - Fired alongside `dispute.updated` when status changes to resolved
+- `dispute.closed` - Fired alongside `dispute.updated` when status changes to closed
+
+Every lifecycle event uses the same data payload:
+
+```json
+{
+  "disputeId": "789e4567-e89b-12d3-a456-426614174000",
+  "paymentId": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "resolved",
+  "reason": "fraud",
+  "disputedAmount": "100.00",
+  "timestamp": "2026-01-26T13:00:00.000Z"
+}
+```
 
 ## Database Schema
 

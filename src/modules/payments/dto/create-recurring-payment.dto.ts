@@ -9,6 +9,7 @@ import {
   IsObject,
   IsISO8601,
   Min,
+  Max,
   MaxLength,
   IsPositive,
 } from 'class-validator';
@@ -131,4 +132,16 @@ export class CreateRecurringPaymentDto {
     minimum: 1,
   })
   maxOccurrences?: number;
+
+  @IsNumber({}, { message: 'notifyDaysBefore must be a number' })
+  @IsOptional()
+  @Min(0, { message: 'notifyDaysBefore must be at least 0' })
+  @Max(14, { message: 'notifyDaysBefore must be at most 14' })
+  @ApiPropertyOptional({
+    description: 'Days before each recurring charge to notify the payer. 0 disables notifications.',
+    example: 3,
+    minimum: 0,
+    maximum: 14,
+  })
+  notifyDaysBefore?: number;
 }

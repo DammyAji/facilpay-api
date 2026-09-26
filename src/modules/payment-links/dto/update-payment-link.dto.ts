@@ -3,6 +3,7 @@ import {
   IsString,
   IsOptional,
   IsISO8601,
+  IsBoolean,
   Min,
   MaxLength,
   IsPositive,
@@ -64,6 +65,11 @@ export class RequiredFieldsDto {
 }
 
 export class UpdatePaymentLinkDto {
+  @IsBoolean()
+  @IsOptional()
+  @ApiPropertyOptional({ description: 'Whether the payment link is active', example: true })
+  isActive?: boolean;
+
   @IsNumber()
   @IsOptional()
   @IsPositive({ message: 'Amount must be a positive number' })

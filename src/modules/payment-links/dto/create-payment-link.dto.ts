@@ -9,12 +9,7 @@ import {
   IsPositive,
   IsBoolean,
   ValidateIf,
-  IsArray,
-  ValidateNested,
-  IsEnum,
-  Matches,
-  ArrayMinSize,
-  ArrayMaxSize,
+  IsInt,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
@@ -102,24 +97,9 @@ export class CreatePaymentLinkDto {
   @ApiPropertyOptional({ description: 'Optional expiry date (ISO 8601)', example: '2026-12-31T23:59:59Z' })
   expiresAt?: string;
 
-  @IsString()
+  @IsInt()
+  @Min(1, { message: 'maxCompletions must be at least 1' })
   @IsOptional()
-  @Matches(/^[a-z0-9-]{3,64}$/, { message: 'Slug must be 3-64 characters, lowercase letters, numbers, and hyphens only' })
-  @ApiPropertyOptional({ description: 'Custom URL-friendly slug (3-64 chars, lowercase letters, numbers, hyphens)', example: 'acme-tshirt' })
-  slug?: string;
-
-  @ValidateNested()
-  @IsOptional()
-  @Type(() => RequiredFieldsDto)
-  @ApiPropertyOptional({ description: 'Required payer fields', type: RequiredFieldsDto })
-  requiredFields?: RequiredFieldsDto;
-
-  @IsArray()
-  @ValidateNested({ each: true })
-  @IsOptional()
-  @ArrayMinSize(1)
-  @ArrayMaxSize(5, { message: 'Maximum 5 custom fields allowed' })
-  @Type(() => CustomFieldDto)
-  @ApiPropertyOptional({ description: 'Custom fields to collect (max 5)', type: [CustomFieldDto], example: [{ key: 'tshirt_size', label: 'T-shirt Size', type: 'select', options: ['S', 'M', 'L', 'XL'], required: true }] })
-  customFields?: CustomFieldDto[];
+  @ApiPropertyOptional({ description: 'Maximum number of completed payments before the link deactivates', example: 1, minimum: 1 })
+  maxCompletions?: number;
 }
