@@ -5,6 +5,7 @@ import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { EmailEventType } from './email-log.entity';
 import { SendEmailJobData } from './email.processor';
+import type { ReportSummary } from '../reports/reports.service';
 
 @Injectable()
 export class EmailNotificationService {
@@ -310,6 +311,58 @@ export class EmailNotificationService {
       },
       eventType: EmailEventType.PAYMENT_RECEIVED,
       recipientRole: 'merchant',
+    });
+  }
+
+  async sendMerchantReport(
+    to: string,
+    summary: ReportSummary,
+    subscriptionId: string,
+    csvContent?: string,
+  ): Promise<void> {
+    const periodLabel = summary.periodStart.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const periodEnd = summary.periodEnd.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    const attachments = csvContent
+      ? [
+          {
+            filename: `report-${summary.periodStart.toISOString().slice(0, 10)}.csv`,
+            content: csvContent,
+            contentType: 'text/csv',
+          },
+        ]
+      : undefined;
+
+    await this.enqueue({
+      to,
+      subject: `Your ${summary.frequency.toLowerCase()} FacilPay report — ${periodLabel}`,
+      templateName: 'merchant-report-summary',
+      templateData: {
+        frequency: summary.frequency,
+        periodStart: periodLabel,
+        periodEnd,
+        totalPayments: summary.totalPayments,
+        completedPayments: summary.completedPayments,
+        totalVolume: summary.totalVolume.toFixed(2),
+        totalFees: summary.totalFees.toFixed(2),
+        totalNetAmount: summary.totalNetAmount.toFixed(2),
+        totalRefunds: summary.totalRefunds.toFixed(2),
+        refundCount: summary.refundCount,
+        currency: summary.currency,
+        subscriptionId,
+        attachments,
+      },
+      eventType: EmailEventType.PAYMENT_RECEIVED,
+      recipientRole: 'merchant',
+      includeUnsubscribe: true,
     });
   }
 

@@ -32,6 +32,8 @@ import { RecurringPaymentsController } from './recurring-payments.controller';
 import { MerchantFeesController } from './merchant-fees.controller';
 import { InvoiceService } from './invoice.service';
 import { EventsModule } from '../events/events.module';
+import { TestModeController } from './test-mode.controller';
+import { TestnetOnlyGuard } from './guards/testnet-only.guard';
 
 @Module({
   imports: [
@@ -64,6 +66,7 @@ import { EventsModule } from '../events/events.module';
     RecurringPaymentsController,
     MerchantFeesController,
     RefundsController,
+    TestModeController,
   ],
   providers: [
     PaymentsService,
@@ -77,6 +80,7 @@ import { EventsModule } from '../events/events.module';
     RecurringPaymentsService,
     InvoiceService,
     InvoiceReminderService,
+    TestnetOnlyGuard,
   ],
   exports: [
     PaymentsService,
