@@ -14,6 +14,7 @@ export enum RecurringPaymentInterval {
 
 export enum RecurringPaymentStatus {
   ACTIVE = 'active',
+  TRIALING = 'trialing',
   PAUSED = 'paused',
   CANCELLED = 'cancelled',
 }
@@ -62,6 +63,15 @@ export class RecurringPayment {
 
   @Column({ type: 'timestamp' })
   nextRunAt: Date;
+
+  @Column({ type: 'int', default: 0 })
+  trialDays: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  trialEndsAt: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  trialEndingNotifiedAt: Date | null;
 
   @Column({ type: 'timestamp', nullable: true })
   lastRunAt: Date | null;

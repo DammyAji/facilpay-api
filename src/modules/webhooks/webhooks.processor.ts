@@ -12,7 +12,7 @@ import { WebhooksService } from './webhooks.service';
 import { WebhookDelivery, WebhookDeliveryStatus } from './entities/webhook-delivery.entity';
 import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
 
-@Processor('webhooks')
+@Processor('webhooks', { limiter: { max: 10, duration: 1000 } })
 @Injectable()
 export class WebhooksProcessor extends WorkerHost {
   private readonly logger: Logger;

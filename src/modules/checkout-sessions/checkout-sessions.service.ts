@@ -180,15 +180,16 @@ export class CheckoutSessionsService {
       {
         amount: Number(session.total) / 100, // Convert from cents
         currency: session.currency,
+        merchantId: session.merchantId,
         description: session.lineItems.map(item => `${item.quantity}x ${item.name}`).join(', '),
         payerEmail,
+        customerId: session.customerId ?? undefined,
         metadata: {
           ...metadata,
           checkoutSessionId: session.id,
           checkoutPublicId: session.publicId,
         },
       },
-      session.merchantId,
     );
 
     // Update session with payment ID and mark as complete

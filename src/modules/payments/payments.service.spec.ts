@@ -72,12 +72,17 @@ describe('PaymentsService', () => {
   const createQueryBuilderMock = () => {
     const qb: any = {};
     qb.andWhere = jest.fn().mockReturnValue(qb);
+    qb.where = jest.fn().mockReturnValue(qb);
+    qb.select = jest.fn().mockReturnValue(qb);
+    qb.addSelect = jest.fn().mockReturnValue(qb);
+    qb.groupBy = jest.fn().mockReturnValue(qb);
     qb.orderBy = jest.fn().mockReturnValue(qb);
     qb.addOrderBy = jest.fn().mockReturnValue(qb);
     qb.skip = jest.fn().mockReturnValue(qb);
     qb.take = jest.fn().mockReturnValue(qb);
     qb.getMany = jest.fn().mockResolvedValue([mockPayment1, mockPayment2]);
     qb.getManyAndCount = jest.fn().mockResolvedValue([[mockPayment1, mockPayment2], 2]);
+    qb.getRawMany = jest.fn().mockResolvedValue([]);
     return qb;
   };
 
@@ -598,6 +603,103 @@ describe('PaymentsService', () => {
       dto.cursor = Buffer.from('invalid-no-separators').toString('base64');
 
       await expect(service.findAll(dto)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('findCustomerPayments', () => {
+    it('paginates customer payments and returns grouped lifetime summaries', async () => {
+      const usdFirstPayment = new Date('2026-01-01T10:00:00.000Z');
+      const usdLastPayment = new Date('2026-02-01T10:00:00.000Z');
+      queryBuilderMock.getManyAndCount.mockResolvedValue([[mockPayment2], 7]);
+      queryBuilderMock.getRawMany.mockResolvedValue([
+        {
+          currency: 'USD',
+          totalPaid: '150.50',
+          totalRefunded: '20.00',
+          paymentCount: '2',
+          firstPaymentAt: usdFirstPayment,
+          lastPaymentAt: usdLastPayment,
+        },
+        {
+          currency: 'EUR',
+          totalPaid: '75.00',
+          totalRefunded: '0',
+          paymentCount: '1',
+          firstPaymentAt: usdFirstPayment,
+          lastPaymentAt: usdFirstPayment,
+        },
+      ]);
+
+      const dto = new GetPaymentsDto();
+      dto.page = 2;
+      dto.limit = 1;
+      const result = await service.findCustomerPayments(
+        'customer-123',
+        'merchant-456',
+        dto,
+      );
+
+      expect(result).toEqual({
+        data: [mockPayment2],
+        total: 7,
+        page: 2,
+        limit: 1,
+        summary: [
+          {
+            currency: 'USD',
+            totalPaid: 150.5,
+            totalRefunded: 20,
+            paymentCount: 2,
+            firstPaymentAt: usdFirstPayment,
+            lastPaymentAt: usdLastPayment,
+          },
+          {
+            currency: 'EUR',
+            totalPaid: 75,
+            totalRefunded: 0,
+            paymentCount: 1,
+            firstPaymentAt: usdFirstPayment,
+            lastPaymentAt: usdFirstPayment,
+          },
+        ],
+      });
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'payment.customerId = :customerId',
+        { customerId: 'customer-123' },
+      );
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'payment.merchantId = :merchantId',
+        { merchantId: 'merchant-456' },
+      );
+      expect(queryBuilderMock.skip).toHaveBeenCalledWith(1);
+      expect(queryBuilderMock.take).toHaveBeenCalledWith(1);
+      expect(queryBuilderMock.getRawMany).toHaveBeenCalled();
+      expect(queryBuilderMock.addSelect).toHaveBeenCalledWith(
+        'COALESCE(SUM(payment.amount), 0)',
+        'totalPaid',
+      );
+      expect(queryBuilderMock.addSelect).toHaveBeenCalledWith(
+        'COALESCE(SUM(payment.refundedAmount), 0)',
+        'totalRefunded',
+      );
+      expect(queryBuilderMock.addSelect).toHaveBeenCalledWith(
+        'COUNT(payment.id)',
+        'paymentCount',
+      );
+      expect(queryBuilderMock.where).toHaveBeenCalledWith(
+        'payment.customerId = :customerId',
+        { customerId: 'customer-123' },
+      );
+      expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
+        'payment.status IN (:...summaryStatuses)',
+        {
+          summaryStatuses: [
+            PaymentStatus.COMPLETED,
+            PaymentStatus.PARTIALLY_REFUNDED,
+            PaymentStatus.REFUNDED,
+          ],
+        },
+      );
     });
   });
 

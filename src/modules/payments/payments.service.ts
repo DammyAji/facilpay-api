@@ -253,7 +253,10 @@ export class PaymentsService {
    * @param idempotencyKey - Optional idempotency key for request deduplication
    * @returns Created payment
    */
-  async create(createPaymentDto: CreatePaymentDto): Promise<Payment> {
+  async create(
+    createPaymentDto: CreatePaymentDto,
+    recurringPaymentId?: string,
+  ): Promise<Payment> {
     const queryRunner = this.dataSource.createQueryRunner();
 
     try {
@@ -277,6 +280,7 @@ export class PaymentsService {
 
       const payment = queryRunner.manager.create(Payment, {
         ...createPaymentDto,
+        recurringPaymentId: recurringPaymentId ?? null,
         merchantEmail: createPaymentDto.merchantEmail || null,
         payerEmail: createPaymentDto.payerEmail || null,
         feeAmount: fee.feeAmount,
@@ -412,17 +416,87 @@ export class PaymentsService {
 
   async findAll(
     getPaymentsDto: GetPaymentsDto,
+    scope?: { customerId: string; merchantId: string },
   ): Promise<CursorPaginatedResult<Payment> | PaginatedResult<Payment>> {
     if (getPaymentsDto.cursor) {
-      return this.findWithCursor(getPaymentsDto);
+      return this.findWithCursor(getPaymentsDto, scope);
     }
-    return this.findWithOffset(getPaymentsDto);
+    return this.findWithOffset(getPaymentsDto, scope);
+  }
+
+  async findCustomerPayments(
+    customerId: string,
+    merchantId: string,
+    dto: GetPaymentsDto,
+  ): Promise<
+    (CursorPaginatedResult<Payment> | PaginatedResult<Payment>) & {
+      summary: Array<{
+        currency: string;
+        totalPaid: number;
+        totalRefunded: number;
+        paymentCount: number;
+        firstPaymentAt: Date | string | null;
+        lastPaymentAt: Date | string | null;
+      }>;
+    }
+  > {
+    const [result, summary] = await Promise.all([
+      this.findAll(dto, { customerId, merchantId }),
+      this.getCustomerPaymentSummary(customerId, merchantId),
+    ]);
+
+    return { ...result, summary };
+  }
+
+  private async getCustomerPaymentSummary(
+    customerId: string,
+    merchantId: string,
+  ): Promise<
+    Array<{
+      currency: string;
+      totalPaid: number;
+      totalRefunded: number;
+      paymentCount: number;
+      firstPaymentAt: Date | string | null;
+      lastPaymentAt: Date | string | null;
+    }>
+  > {
+    const rows = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .select('payment.currency', 'currency')
+      .addSelect('COALESCE(SUM(payment.amount), 0)', 'totalPaid')
+      .addSelect('COALESCE(SUM(payment.refundedAmount), 0)', 'totalRefunded')
+      .addSelect('COUNT(payment.id)', 'paymentCount')
+      .addSelect('MIN(payment.createdAt)', 'firstPaymentAt')
+      .addSelect('MAX(payment.createdAt)', 'lastPaymentAt')
+      .where('payment.customerId = :customerId', { customerId })
+      .andWhere('payment.merchantId = :merchantId', { merchantId })
+      .andWhere('payment.status IN (:...summaryStatuses)', {
+        summaryStatuses: [
+          PaymentStatus.COMPLETED,
+          PaymentStatus.PARTIALLY_REFUNDED,
+          PaymentStatus.REFUNDED,
+        ],
+      })
+      .groupBy('payment.currency')
+      .orderBy('payment.currency', 'ASC')
+      .getRawMany();
+
+    return rows.map((row) => ({
+      currency: row.currency,
+      totalPaid: Number(row.totalPaid),
+      totalRefunded: Number(row.totalRefunded),
+      paymentCount: Number(row.paymentCount),
+      firstPaymentAt: row.firstPaymentAt ?? null,
+      lastPaymentAt: row.lastPaymentAt ?? null,
+    }));
   }
 
   private async findWithOffset(
     dto: GetPaymentsDto,
+    scope?: { customerId: string; merchantId: string },
   ): Promise<PaginatedResult<Payment>> {
-    const query = this.buildFilterQuery(dto);
+    const query = this.buildFilterQuery(dto, scope);
 
     const page = dto.page || 1;
     const limit = dto.limit || 20;
@@ -438,13 +512,14 @@ export class PaymentsService {
 
   private async findWithCursor(
     dto: GetPaymentsDto,
+    scope?: { customerId: string; merchantId: string },
   ): Promise<CursorPaginatedResult<Payment>> {
     const decoded = this.decodeCursor(dto.cursor!);
     const limit = dto.limit || 20;
     const order = dto.order || SortOrder.DESC;
     const sortBy = dto.sortBy || PaymentSortBy.CREATED_AT;
 
-    const query = this.buildFilterQuery(dto);
+    const query = this.buildFilterQuery(dto, scope);
 
     this.applyCursorCondition(query, sortBy, order, decoded);
 
@@ -466,8 +541,20 @@ export class PaymentsService {
     return { data: payments, nextCursor, hasMore };
   }
 
-  private buildFilterQuery(dto: GetPaymentsDto): SelectQueryBuilder<Payment> {
+  private buildFilterQuery(
+    dto: GetPaymentsDto,
+    scope?: { customerId: string; merchantId: string },
+  ): SelectQueryBuilder<Payment> {
     const query = this.paymentRepository.createQueryBuilder('payment');
+
+    if (scope) {
+      query.andWhere('payment.customerId = :customerId', {
+        customerId: scope.customerId,
+      });
+      query.andWhere('payment.merchantId = :merchantId', {
+        merchantId: scope.merchantId,
+      });
+    }
 
     if (dto.status) {
       query.andWhere('payment.status = :status', { status: dto.status });

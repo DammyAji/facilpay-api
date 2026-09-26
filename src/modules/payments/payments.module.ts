@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
+import { CustomerPaymentsController } from './customer-payments.controller';
 import { Payment } from './payment.entity';
 import { Refund } from './refund.entity';
 import { PaymentSplit } from './payment-split.entity';
@@ -27,6 +28,7 @@ import { DisputesController } from './disputes.controller';
 import { Dispute } from './dispute.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RecurringPayment } from './recurring-payment.entity';
+import { RecurringPaymentCharge } from './recurring-payment-charge.entity';
 import { RecurringPaymentsService } from './recurring-payments.service';
 import { RecurringPaymentsController } from './recurring-payments.controller';
 import { MerchantFeesController } from './merchant-fees.controller';
@@ -47,6 +49,7 @@ import { TestnetOnlyGuard } from './guards/testnet-only.guard';
       MerchantFeeConfig,
       Dispute,
       RecurringPayment,
+      RecurringPaymentCharge,
       SettlementAdjustment,
       InvoiceReminder,
     ]),
@@ -60,6 +63,7 @@ import { TestnetOnlyGuard } from './guards/testnet-only.guard';
   ],
   controllers: [
     PaymentsController,
+    CustomerPaymentsController,
     CurrenciesController,
     PaymentQrController,
     DisputesController,
