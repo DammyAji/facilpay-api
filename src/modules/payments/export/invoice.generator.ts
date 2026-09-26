@@ -6,7 +6,23 @@ export interface InvoiceData {
   payment: Payment;
   invoiceNumber: string;
   generatedAt: Date;
+  branding?: {
+    displayName: string;
+    logo: string | null;
+    primaryColor: string;
+    supportEmail: string | null;
+    supportUrl: string | null;
+  };
 }
+
+// Default FacilPay branding
+const DEFAULT_BRANDING = {
+  displayName: 'FacilPay',
+  logo: null,
+  primaryColor: '#1a1a2e',
+  supportEmail: 'support@facilpay.com',
+  supportUrl: 'https://facilpay.com',
+};
 
 /**
  * Draws a horizontal rule line at the current y position.
@@ -55,7 +71,8 @@ function labelRow(
  * Returns a PDFDocument that can be piped to a response stream.
  */
 export function generateInvoicePdf(data: InvoiceData): PDFKitType.PDFDocument {
-  const { payment, invoiceNumber, generatedAt } = data;
+  const { payment, invoiceNumber, generatedAt, branding } = data;
+  const brand = { ...DEFAULT_BRANDING, ...branding };
   const doc = new PDFDocument({ size: 'A4', margin: 50 });
 
   const pageLeft = doc.page.margins.left;
@@ -68,8 +85,8 @@ export function generateInvoicePdf(data: InvoiceData): PDFKitType.PDFDocument {
   doc
     .font('Helvetica-Bold')
     .fontSize(24)
-    .fillColor('#1a1a2e')
-    .text('FacilPay', pageLeft, 50);
+    .fillColor(brand.primaryColor)
+    .text(brand.displayName, pageLeft, 50);
 
   doc
     .font('Helvetica')
@@ -283,12 +300,16 @@ export function generateInvoicePdf(data: InvoiceData): PDFKitType.PDFDocument {
   const footerY = doc.page.height - doc.page.margins.bottom - 40;
   drawHRule(doc, footerY);
 
+  const footerText = brand.supportUrl 
+    ? `This is an automatically generated invoice. ${brand.displayName} — ${brand.supportUrl}`
+    : `This is an automatically generated invoice. ${brand.displayName}`;
+
   doc
     .font('Helvetica')
     .fontSize(8)
     .fillColor('#aaaaaa')
     .text(
-      'This is an automatically generated invoice. FacilPay — facilpay.com',
+      footerText,
       pageLeft,
       footerY + 10,
       { width: contentWidth, align: 'center' },

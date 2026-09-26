@@ -1,4 +1,5 @@
-import { Controller, Patch, Get, Body, UseGuards } from '@nestjs/common';
+import { Controller, Patch, Get, Put, Body, UseGuards, UseInterceptors, UploadedFile, Post } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -8,6 +9,7 @@ import {
   ApiUnauthorizedResponse,
   ApiBadRequestResponse,
   ApiForbiddenResponse,
+  ApiConsumes,
 } from '@nestjs/swagger';
 import { MerchantsService } from './merchants.service';
 import { UpdateGeoRestrictionsDto } from './dto/update-geo-restrictions.dto';
@@ -15,6 +17,8 @@ import { UpdateIpAllowlistDto } from './dto/update-ip-allowlist.dto';
 import { MerchantProfileResponseDto, UpdateMerchantProfileDto } from './dto/merchant-profile.dto';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';
 import { MerchantIpAllowlist } from './entities/merchant-ip-allowlist.entity';
+import { MerchantBranding } from './entities/merchant-branding.entity';
+import { MerchantSettings } from './entities/merchant-settings.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
@@ -143,5 +147,162 @@ export class MerchantsController {
   ): Promise<{ merchantId: string; allowedIps: string[] }> {
     const record = await this.merchantsService.getIpAllowlist(user.id);
     return { merchantId: user.id, allowedIps: record?.allowedIps ?? [] };
+  }
+
+  // ============ Branding Endpoints ============
+
+  @Get('me/branding')
+  @ApiOperation({
+    summary: 'Get merchant branding',
+    description: 'Returns the current branding configuration for the authenticated merchant. Returns defaults if not set.',
+  })
+  @ApiOkResponse({
+    description: 'Current branding configuration.',
+    schema: {
+      example: {
+        merchantId: 'abc123-merchant-uuid',
+        displayName: 'My Store',
+        logo: 'https://storage.googleapis.com/facilpay-assets/branding/logos/abc.png',
+        primaryColor: '#1a1a2e',
+        supportEmail: 'support@mystore.com',
+        supportUrl: 'https://mystore.com/support',
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T10:00:00.000Z',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  async getBranding(
+    @CurrentUser() user: User,
+  ): Promise<MerchantBranding | object> {
+    const branding = await this.merchantsService.getBranding(user.id);
+    if (!branding) {
+      return {
+        merchantId: user.id,
+        displayName: 'FacilPay',
+        logo: null,
+        primaryColor: '#1a1a2e',
+        supportEmail: 'support@facilpay.com',
+        supportUrl: 'https://facilpay.com',
+      };
+    }
+    return branding;
+  }
+
+  @Patch('me/branding')
+  @ApiOperation({
+    summary: 'Update merchant branding',
+    description: 'Updates the branding configuration for the authenticated merchant.',
+  })
+  @ApiBody({ type: UpdateBrandingDto })
+  @ApiOkResponse({
+    description: 'Branding configuration updated.',
+    schema: {
+      example: {
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        merchantId: 'abc123-merchant-uuid',
+        displayName: 'My Store',
+        logo: null,
+        primaryColor: '#ff5500',
+        supportEmail: 'support@mystore.com',
+        supportUrl: 'https://mystore.com/support',
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T12:00:00.000Z',
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Validation failed.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  updateBranding(
+    @Body() dto: UpdateBrandingDto,
+    @CurrentUser() user: User,
+  ): Promise<MerchantBranding> {
+    return this.merchantsService.upsertBranding(user.id, dto);
+  }
+
+  @Put('me/branding/logo')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({
+    summary: 'Upload merchant logo',
+    description: 'Uploads a logo for the merchant. Accepts PNG or SVG files up to 500KB.',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiOkResponse({
+    description: 'Logo uploaded successfully.',
+    schema: {
+      example: {
+        logoUrl: 'https://storage.googleapis.com/facilpay-assets/branding/logos/abc123.png',
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid file type or size.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  uploadLogo(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: User,
+  ): Promise<{ logoUrl: string }> {
+    return this.merchantsService.uploadLogo(user.id, file);
+  }
+
+  // ============ Settings Endpoints ============
+
+  @Get('me/settings')
+  @ApiOperation({
+    summary: 'Get merchant settings',
+    description: 'Returns the current settings for the authenticated merchant.',
+  })
+  @ApiOkResponse({
+    description: 'Current merchant settings.',
+    schema: {
+      example: {
+        merchantId: 'abc123-merchant-uuid',
+        remindersEnabled: true,
+        reminderOffsets: [-3, 0, 7],
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T10:00:00.000Z',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  async getSettings(
+    @CurrentUser() user: User,
+  ): Promise<MerchantSettings | object> {
+    const settings = await this.merchantsService.getSettings(user.id);
+    if (!settings) {
+      return {
+        merchantId: user.id,
+        remindersEnabled: true,
+        reminderOffsets: [-3, 0, 7],
+      };
+    }
+    return settings;
+  }
+
+  @Patch('me/settings')
+  @ApiOperation({
+    summary: 'Update merchant settings',
+    description: 'Updates the settings for the authenticated merchant.',
+  })
+  @ApiBody({ type: UpdateSettingsDto })
+  @ApiOkResponse({
+    description: 'Settings updated.',
+    schema: {
+      example: {
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        merchantId: 'abc123-merchant-uuid',
+        remindersEnabled: false,
+        reminderOffsets: [0, 7],
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T12:00:00.000Z',
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Validation failed.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  updateSettings(
+    @Body() dto: UpdateSettingsDto,
+    @CurrentUser() user: User,
+  ): Promise<MerchantSettings> {
+    return this.merchantsService.upsertSettings(user.id, dto);
   }
 }

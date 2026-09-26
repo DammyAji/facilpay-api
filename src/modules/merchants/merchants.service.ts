@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';
@@ -16,6 +16,10 @@ import { ActorType } from '../audit-logs/audit-log.entity';
 
 @Injectable()
 export class MerchantsService {
+  private readonly storage: Storage;
+  private readonly bucketName: string;
+  private readonly logoStoragePath = 'branding/logos';
+
   constructor(
     @InjectRepository(MerchantGeoRestriction)
     private readonly geoRestrictionRepo: Repository<MerchantGeoRestriction>,

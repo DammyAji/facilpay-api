@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
+import { MulterModule } from '@nestjs/platform-express';
 import { MerchantsService } from './merchants.service';
 import { MerchantsController } from './merchants.controller';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';

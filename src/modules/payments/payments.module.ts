@@ -46,6 +46,7 @@ import { EventsModule } from '../events/events.module';
       Dispute,
       RecurringPayment,
       SettlementAdjustment,
+      InvoiceReminder,
     ]),
     WebhooksModule,
     StellarModule,
@@ -75,6 +76,7 @@ import { EventsModule } from '../events/events.module';
     PaymentSseService,
     RecurringPaymentsService,
     InvoiceService,
+    InvoiceReminderService,
   ],
   exports: [
     PaymentsService,

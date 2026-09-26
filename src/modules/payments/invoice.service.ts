@@ -10,6 +10,7 @@ import type { Response } from 'express';
 import { Payment, PaymentStatus } from './payment.entity';
 import { generateInvoicePdf } from './export/invoice.generator';
 import { AppLogger } from '../logger/logger.service';
+import { MerchantsService } from '../merchants/merchants.service';
 import type { Logger } from 'pino';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class InvoiceService {
   constructor(
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
+    private readonly merchantsService: MerchantsService,
     appLogger: AppLogger,
   ) {
     this.logger = appLogger.child({ module: InvoiceService.name });
@@ -83,14 +85,28 @@ export class InvoiceService {
    *
    * @param payment  The payment record to render
    * @param res  Express Response to pipe the PDF into
+   * @param branding  Optional merchant branding (falls back to defaults if not provided)
    */
-  streamInvoicePdf(payment: Payment, res: Response): void {
+  async streamInvoicePdf(payment: Payment, res: Response, branding?: {
+    displayName: string;
+    logo: string | null;
+    primaryColor: string;
+    supportEmail: string | null;
+    supportUrl: string | null;
+  }): Promise<void> {
     const invoiceNumber = payment.id.replace(/-/g, '').substring(0, 16).toUpperCase();
+
+    // Get merchant branding if not provided
+    let merchantBranding = branding;
+    if (!merchantBranding && payment.merchantId) {
+      merchantBranding = await this.merchantsService.getBrandingWithDefaults(payment.merchantId);
+    }
 
     const doc = generateInvoicePdf({
       payment,
       invoiceNumber,
       generatedAt: new Date(),
+      branding: merchantBranding,
     });
 
     res.setHeader('Content-Type', 'application/pdf');

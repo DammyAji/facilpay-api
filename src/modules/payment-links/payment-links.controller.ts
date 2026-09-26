@@ -29,6 +29,7 @@ import { PaymentLinksService } from './payment-links.service';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { UpdatePaymentLinkDto } from './dto/update-payment-link.dto';
 import { RedeemPaymentLinkDto } from './dto/redeem-payment-link.dto';
+import { GetAnalyticsDto, AnalyticsResponseDto } from './dto/get-analytics.dto';
 import { PaymentLink } from './payment-link.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Public } from '../auth/decorators/public.decorator';
@@ -129,5 +130,26 @@ export class PaymentLinksController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
   deactivate(@Param('id') id: string, @Request() req: any) {
     return this.service.deactivate(id, req.user.id);
+  }
+
+  @Get(':id/analytics')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Get payment link analytics',
+    description: 'Returns detailed analytics for a payment link including views, redemptions, completions over time.',
+  })
+  @ApiParam({ name: 'id', description: 'Payment link UUID' })
+  @ApiOkResponse({ description: 'Analytics data', type: AnalyticsResponseDto })
+  @ApiNotFoundResponse({ description: 'Link not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  @ApiQuery({ name: 'from', required: false, description: 'Start date (ISO 8601)' })
+  @ApiQuery({ name: 'to', required: false, description: 'End date (ISO 8601)' })
+  @ApiQuery({ name: 'interval', required: false, enum: ['day', 'week'], description: 'Time interval for bucketing' })
+  getAnalytics(
+    @Param('id') id: string,
+    @Query() dto: GetAnalyticsDto,
+    @Request() req: any,
+  ) {
+    return this.service.getAnalytics(id, req.user.id, dto);
   }
 }

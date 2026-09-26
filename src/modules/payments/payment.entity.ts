@@ -16,6 +16,7 @@ export enum PaymentStatus {
   PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
   EXPIRED = 'EXPIRED',
   PARTIALLY_COMPLETED = 'PARTIALLY_COMPLETED',
+  OVERDUE = 'OVERDUE',
 }
 
 @Entity('payments')
@@ -90,6 +91,13 @@ export class Payment {
 
   @Column({ nullable: true })
   paymentLinkId: string | null = null;
+
+  @Index()
+  @Column({ type: 'timestamp', nullable: true })
+  dueDate: Date | null = null;
+
+  @Column({ default: true })
+  remindersEnabled: boolean = true;
 
   @CreateDateColumn()
   createdAt: Date;
