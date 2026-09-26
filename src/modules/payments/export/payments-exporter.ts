@@ -157,3 +157,82 @@ export function createPaymentsPdfDocument(): PDFKitType.PDFDocument {
     return doc;
 }
 
+export interface SettlementStatementRow {
+    paymentId: string;
+    reference: string | null;
+    gross: number;
+    fee: number;
+    net: number;
+    refunds: number;
+    adjustments: number;
+}
+
+export function createSettlementStatementPdfDocument(header: {
+    merchant: string;
+    period: string;
+    currency: string;
+    transactionHash: string | null;
+    settlementAmount: number;
+}): PDFKitType.PDFDocument {
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    doc.font('Helvetica').fontSize(16).text('Settlement Statement');
+    doc.moveDown(0.5);
+    doc.fontSize(10);
+    doc.text(`Merchant: ${header.merchant}`);
+    doc.text(`Period: ${header.period}`);
+    doc.text(`Currency: ${header.currency}`);
+    doc.text(`Transaction hash: ${header.transactionHash ?? 'N/A'}`);
+    doc.text(`Settlement amount: ${header.settlementAmount.toFixed(2)}`);
+    doc.moveDown();
+    return doc;
+}
+
+export function writeSettlementStatementPdfTable(
+    doc: PDFKitType.PDFDocument,
+    rows: SettlementStatementRow[],
+    totals: SettlementStatementRow,
+): void {
+    const headers = ['Payment ID', 'Reference', 'Gross', 'Fee', 'Net', 'Refunds', 'Adjustments'];
+    const widths = [125, 100, 55, 55, 55, 65, 75];
+    const leftMargin = doc.page.margins.left;
+    const rowHeight = 18;
+    let y = doc.y;
+
+    const drawHeader = () => {
+        doc.font('Helvetica-Bold').fontSize(8);
+        let x = leftMargin;
+        headers.forEach((header, index) => {
+            doc.text(header, x, y, { width: widths[index], ellipsis: true });
+            x += widths[index];
+        });
+        y += rowHeight;
+        doc.font('Helvetica').fontSize(8);
+    };
+
+    drawHeader();
+    for (const row of [...rows, totals]) {
+        if (y + rowHeight > doc.page.height - doc.page.margins.bottom) {
+            doc.addPage();
+            y = doc.y;
+            drawHeader();
+        }
+        const values = [
+            row.paymentId,
+            row.reference ?? '',
+            row.gross.toFixed(2),
+            row.fee.toFixed(2),
+            row.net.toFixed(2),
+            row.refunds.toFixed(2),
+            row.adjustments.toFixed(2),
+        ];
+        let x = leftMargin;
+        values.forEach((value, index) => {
+            doc.text(value, x, y, { width: widths[index], ellipsis: true });
+            x += widths[index];
+        });
+        y += rowHeight;
+    }
+    doc.moveDown(0.5);
+    doc.font('Helvetica-Bold').text(`Statement net total: ${totals.net.toFixed(2)}`);
+}
+

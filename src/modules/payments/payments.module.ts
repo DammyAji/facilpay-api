@@ -62,6 +62,7 @@ import { EventsModule } from '../events/events.module';
     DisputesController,
     RecurringPaymentsController,
     MerchantFeesController,
+    RefundsController,
   ],
   providers: [
     PaymentsService,

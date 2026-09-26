@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, DataSource } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -35,6 +35,10 @@ export class SettlementsService {
     private readonly configRepo: Repository<MerchantSettlementConfig>,
     @InjectRepository(Payment)
     private readonly paymentRepo: Repository<Payment>,
+    @InjectRepository(PayoutDestination)
+    private readonly destinationRepo: Repository<PayoutDestination>,
+    @InjectRepository(Refund)
+    private readonly refundRepo: Repository<Refund>,
     private readonly dataSource: DataSource,
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
@@ -51,12 +55,183 @@ export class SettlementsService {
       ).toLowerCase() === 'true';
   }
 
+  async listPayoutDestinations(merchantId: string): Promise<PayoutDestination[]> {
+    return this.destinationRepo.find({
+      where: { merchantId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async createPayoutDestination(
+    merchantId: string,
+    dto: CreatePayoutDestinationDto,
+    stepUpToken: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<PayoutDestination> {
+    this.authService.validateStepUpToken(stepUpToken, merchantId);
+    await this.stellarService.validatePayoutDestination(
+      dto.stellarAddress,
+      dto.assetCode,
+    );
+
+    const token = randomBytes(32).toString('hex');
+    const destination = this.destinationRepo.create({
+      ...dto,
+      merchantId,
+      assetCode: dto.assetCode.toUpperCase(),
+      isDefault: false,
+      verificationTokenHash: createHash('sha256').update(token).digest('hex'),
+      verificationTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      coolingOffUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    const saved = await this.destinationRepo.save(destination);
+
+    const user = await this.usersService.findOne(merchantId);
+    if (user?.email) {
+      await this.mailService.sendPayoutDestinationVerificationEmail(
+        user.email,
+        saved.id,
+        saved.label,
+        token,
+      );
+    }
+    await this.auditLogsService.record({
+      actorId: merchantId,
+      actorType: 'user',
+      action: 'payout_destination.created',
+      resourceType: 'payout_destination',
+      resourceId: saved.id,
+      ipAddress,
+      userAgent,
+      metadata: { assetCode: saved.assetCode, stellarAddress: saved.stellarAddress },
+    });
+    if (dto.isDefault) {
+      await this.destinationRepo
+        .createQueryBuilder()
+        .update(PayoutDestination)
+        .set({ isDefault: false })
+        .where('merchantId = :merchantId AND assetCode = :assetCode AND id != :id', {
+          merchantId,
+          assetCode: saved.assetCode,
+          id: saved.id,
+        })
+        .execute();
+      saved.isDefault = true;
+      await this.destinationRepo.save(saved);
+    }
+    return saved;
+  }
+
+  async verifyPayoutDestination(
+    merchantId: string,
+    destinationId: string,
+    dto: VerifyPayoutDestinationDto,
+  ): Promise<PayoutDestination> {
+    const destination = await this.destinationRepo.findOneBy({
+      id: destinationId,
+      merchantId,
+    });
+    if (!destination) throw new NotFoundException('Payout destination not found');
+    if (!destination.verificationTokenExpiresAt || destination.verificationTokenExpiresAt < new Date()) {
+      throw new BadRequestException('Verification token is invalid or expired');
+    }
+    const tokenHash = createHash('sha256').update(dto.token).digest('hex');
+    if (tokenHash !== destination.verificationTokenHash) {
+      throw new BadRequestException('Verification token is invalid or expired');
+    }
+
+    destination.verifiedAt = new Date();
+    destination.verificationTokenHash = null;
+    destination.verificationTokenExpiresAt = null;
+    const saved = await this.destinationRepo.save(destination);
+    await this.auditLogsService.record({
+      actorId: merchantId,
+      actorType: 'user',
+      action: 'payout_destination.verified',
+      resourceType: 'payout_destination',
+      resourceId: saved.id,
+    });
+    return saved;
+  }
+
+  async updatePayoutDestination(
+    merchantId: string,
+    destinationId: string,
+    dto: CreatePayoutDestinationDto,
+    stepUpToken: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<PayoutDestination> {
+    this.authService.validateStepUpToken(stepUpToken, merchantId);
+    const destination = await this.destinationRepo.findOneBy({
+      id: destinationId,
+      merchantId,
+    });
+    if (!destination) throw new NotFoundException('Payout destination not found');
+
+    await this.stellarService.validatePayoutDestination(
+      dto.stellarAddress,
+      dto.assetCode,
+    );
+    const token = randomBytes(32).toString('hex');
+    Object.assign(destination, {
+      ...dto,
+      assetCode: dto.assetCode.toUpperCase(),
+      isDefault: false,
+      verifiedAt: null,
+      coolingOffUntil: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      verificationTokenHash: createHash('sha256').update(token).digest('hex'),
+      verificationTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+    const saved = await this.destinationRepo.save(destination);
+
+    const user = await this.usersService.findOne(merchantId);
+    if (user?.email) {
+      await this.mailService.sendPayoutDestinationVerificationEmail(
+        user.email,
+        saved.id,
+        saved.label,
+        token,
+      );
+    }
+    await this.auditLogsService.record({
+      actorId: merchantId,
+      actorType: 'user',
+      action: 'payout_destination.updated',
+      resourceType: 'payout_destination',
+      resourceId: saved.id,
+      ipAddress,
+      userAgent,
+      metadata: { assetCode: saved.assetCode, stellarAddress: saved.stellarAddress },
+    });
+    return saved;
+  }
+
+  async getEligibleDestination(merchantId: string, destinationId: string, currency: string): Promise<PayoutDestination> {
+    const destination = await this.destinationRepo.findOneBy({ id: destinationId, merchantId });
+    if (!destination || destination.assetCode !== currency) {
+      throw new BadRequestException('Payout destination does not match the settlement currency');
+    }
+    if (!destination.verifiedAt) {
+      throw new BadRequestException('Payout destination must be email verified before use');
+    }
+    if (destination.coolingOffUntil && destination.coolingOffUntil > new Date()) {
+      throw new BadRequestException('Payout destination is still in its cooling-off period');
+    }
+    return destination;
+  }
+
   async upsertConfig(userId: string, dto: UpsertSettlementConfigDto): Promise<MerchantSettlementConfig> {
     let config = await this.configRepo.findOneBy({ userId, currency: dto.currency });
     if (!config) {
       config = this.configRepo.create({ userId, ...dto });
     } else {
       config.schedule = dto.schedule;
+      config.destinationId = dto.destinationId ?? null;
+    }
+    if (dto.destinationId) {
+      await this.getEligibleDestination(userId, dto.destinationId, dto.currency);
     }
     return this.configRepo.save(config);
   }
@@ -132,6 +307,84 @@ export class SettlementsService {
       where: { settlementId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async getSettlementStatement(
+    settlementId: string,
+    userId: string,
+    isAdmin: boolean,
+  ): Promise<{
+    settlement: Settlement;
+    merchant: string;
+    period: { from: Date | null; to: Date };
+    rows: SettlementStatementRow[];
+    totals: SettlementStatementRow;
+  }> {
+    const settlement = await this.settlementRepo.findOneBy({ id: settlementId });
+    if (!settlement) throw new NotFoundException(`Settlement ${settlementId} not found`);
+    if (!isAdmin && settlement.merchantId !== userId) {
+      throw new ForbiddenException('You cannot access this settlement statement');
+    }
+
+    const payments = settlement.paymentIds.length
+      ? await this.paymentRepo.findBy({ id: In(settlement.paymentIds) })
+      : [];
+    const refunds = settlement.paymentIds.length
+      ? await this.refundRepo.find({ where: { paymentId: In(settlement.paymentIds) } })
+      : [];
+    const adjustments = await this.settlementAdjustmentRepo.find({
+      where: { settlementId: settlement.id },
+    });
+
+    const rows = payments.map((payment) => {
+      const gross = Number(payment.amount || 0);
+      const fee = Number(payment.feeAmount || 0);
+      const net = Number(
+        payment.netAmount !== undefined && payment.netAmount !== null
+          ? payment.netAmount
+          : gross - fee,
+      );
+      const paymentRefunds = refunds
+        .filter((refund) => refund.paymentId === payment.id)
+        .reduce((sum, refund) => sum + Number(refund.amount || 0), 0);
+      const paymentAdjustments = adjustments
+        .filter((adjustment) => adjustment.paymentId === payment.id)
+        .reduce((sum, adjustment) => sum + Number(adjustment.amount || 0), 0);
+
+      return {
+        paymentId: payment.id,
+        reference: payment.externalReference,
+        gross,
+        fee,
+        net,
+        refunds: paymentRefunds,
+        adjustments: paymentAdjustments,
+      };
+    });
+
+    const totals = rows.reduce<SettlementStatementRow>(
+      (total, row) => ({
+        paymentId: 'TOTAL',
+        reference: null,
+        gross: total.gross + row.gross,
+        fee: total.fee + row.fee,
+        net: total.net + row.net,
+        refunds: total.refunds + row.refunds,
+        adjustments: total.adjustments + row.adjustments,
+      }),
+      { paymentId: 'TOTAL', reference: null, gross: 0, fee: 0, net: 0, refunds: 0, adjustments: 0 },
+    );
+
+    const from = payments.length
+      ? new Date(Math.min(...payments.map((payment) => payment.createdAt.getTime())))
+      : null;
+    return {
+      settlement,
+      merchant: settlement.merchantId,
+      period: { from, to: settlement.processedAt },
+      rows,
+      totals,
+    };
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -225,6 +478,15 @@ export class SettlementsService {
         return null;
       }
 
+      if (!lockedConfig.destinationId) {
+        throw new BadRequestException('A verified payout destination is required for settlement');
+      }
+      await this.getEligibleDestination(
+        lockedConfig.userId,
+        lockedConfig.destinationId,
+        lockedConfig.currency,
+      );
+
       // Use the fresh config value with the lock acquired
       const since = lockedConfig.lastSettledAt ?? new Date(0);
 
@@ -259,6 +521,7 @@ export class SettlementsService {
         schedule: lockedConfig.schedule,
         totalAmount,
         currency: lockedConfig.currency,
+        payoutDestinationId: lockedConfig.destinationId,
         paymentIds: completedPayments.map((p) => p.id),
         processedAt: new Date(),
         status: SettlementStatus.PENDING,

@@ -32,6 +32,12 @@ export class Settlement {
   @Column({ length: 3 })
   currency: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  payoutDestinationId: string | null = null;
+
+  @Column({ nullable: true })
+  transactionHash: string | null = null;
+
   @Column({ type: 'jsonb', default: [] })
   paymentIds: string[];
 
