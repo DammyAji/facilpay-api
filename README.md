@@ -235,3 +235,8 @@ Environment variables:
 - [Checkout Sessions](docs/CHECKOUT_SESSIONS.md) — hosted checkout sessions
 - [Exports](docs/EXPORTS.md) — background export jobs
 - [Environment](docs/ENVIRONMENT.md) — environment variable reference
+
+## Handsoff notes
+
+<!-- handsoff-issue-511 -->
+- #511: Add global search endpoint GET /v1/search
